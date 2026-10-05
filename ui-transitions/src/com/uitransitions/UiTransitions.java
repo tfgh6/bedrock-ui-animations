@@ -259,7 +259,8 @@ public final class UiTransitions {
                     float ms = Math.max(1.0F, TransitionConfig.durationMs());
                     float progress = (System.nanoTime() - started) / (ms * 1_000_000.0F);
                     // 先等一小会儿（约 35% 时长）再淡入，避免和界面一起冒出来显得突兀
-                    float delayed = (progress - 0.35F) / 0.65F;
+                    float delay = TransitionConfig.previewFadeDelay() / 100.0F;
+                    float delayed = (progress - delay) / Math.max(0.05F, 1.0F - delay);
                     PREVIEW_ALPHA_OVERRIDE = Math.max(0.0F, Math.min(1.0F, delayed));
                 }
             } catch (Throwable ignored) {

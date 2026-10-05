@@ -109,6 +109,13 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         layers.addOption(bool(builder, "animate_subtitles", "音效字幕跟随动画",
                 "字幕在背景层里顺带绘制，默认不参与动画（否则打开背包时字幕会跟着动）", false,
                 TransitionConfig.animateSubtitles(), TransitionConfig::setAnimateSubtitles));
+        layers.addOption(bool(builder, "stagger_close", "关闭时内容提前淡出",
+                "关闭动画里物品与文字比底板略早结束淡出，避免出现空格子", true,
+                TransitionConfig.staggerClose(), TransitionConfig::setStaggerClose));
+        layers.addOption(intOption(builder, "preview_fade_delay", "玩家模型延迟淡入",
+                "打开界面时玩家模型等待多久才开始淡入（占动画时长百分比）", 35, 0, 100, 5,
+                TransitionConfig.previewFadeDelay(), TransitionConfig::setPreviewFadeDelay,
+                value -> tr(value + "%")));
         layers.addOption(bool(builder, "animate_tab_switch", "分类标签切换动画",
                 "点创造模式物品栏的分类标签时，物品区从点击方向滑入（底板与快捷栏不动）", true,
                 TransitionConfig.animateTabSwitch(), TransitionConfig::setAnimateTabSwitch));
@@ -179,6 +186,7 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "animate_same_type_switch" -> TransitionConfig.animateSameTypeSwitch();
             case "animate_tab_switch" -> TransitionConfig.animateTabSwitch();
             case "hide_player_model_on_close" -> TransitionConfig.hidePlayerModelOnClose();
+            case "stagger_close" -> TransitionConfig.staggerClose();
             case "tab_follow_click" -> TransitionConfig.tabFollowClick();
             case "overlay_mods_fade_only" -> TransitionConfig.overlayModsFadeOnly();
             case "animate_all_screens" -> TransitionConfig.animateAllScreens();
@@ -200,6 +208,7 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "tab_slide" -> TransitionConfig.tabSlide();
             case "scroll_fade_band" -> TransitionConfig.scrollFadeBand();
             case "scroll_fade_min" -> TransitionConfig.scrollFadeMin();
+            case "preview_fade_delay" -> TransitionConfig.previewFadeDelay();
             default -> 0;
         };
     }

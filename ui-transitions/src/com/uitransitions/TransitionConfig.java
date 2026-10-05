@@ -57,6 +57,7 @@ public final class TransitionConfig {
     private static volatile int scrollFadeBand = 200;
     private static volatile int scrollFadeMin = 0;
     private static volatile boolean hidePlayerModelOnClose = true;
+    private static volatile int previewFadeDelay = 35;
     private static volatile String excludedScreens = "";
     private static volatile Set<String> excludedSet = Collections.emptySet();
     private static volatile String extraScreens = DEFAULT_EXTRA_SCREENS;
@@ -206,6 +207,7 @@ public final class TransitionConfig {
         scrollFadeBand = clampBand(readInt(properties, "scrollFadeBand", scrollFadeBand));
         scrollFadeMin = clampMin(readInt(properties, "scrollFadeMin", scrollFadeMin));
         hidePlayerModelOnClose = readBoolean(properties, "hidePlayerModelOnClose", hidePlayerModelOnClose);
+        previewFadeDelay = Math.max(0, Math.min(100, readInt(properties, "previewFadeDelay", previewFadeDelay)));
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
         curveId = Curve.byId(properties.getProperty("curve", curveId)).id();
@@ -249,6 +251,7 @@ public final class TransitionConfig {
         properties.setProperty("scrollFadeBand", Integer.toString(scrollFadeBand));
         properties.setProperty("scrollFadeMin", Integer.toString(scrollFadeMin));
         properties.setProperty("hidePlayerModelOnClose", Boolean.toString(hidePlayerModelOnClose));
+        properties.setProperty("previewFadeDelay", Integer.toString(previewFadeDelay));
         properties.setProperty("excludedScreens", excludedScreens == null ? "" : excludedScreens);
         properties.setProperty("extraScreens", extraScreens == null ? "" : extraScreens);
         try (FileOutputStream out = new FileOutputStream(file)) {
@@ -284,6 +287,7 @@ public final class TransitionConfig {
         scrollFadeBand = 200;
         scrollFadeMin = 0;
         hidePlayerModelOnClose = true;
+        previewFadeDelay = 35;
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;
         curveId = Curve.CUBIC.id();
@@ -413,6 +417,11 @@ public final class TransitionConfig {
     /** 关闭界面时是否直接隐藏玩家模型（布娃娃） */
     public static boolean hidePlayerModelOnClose() {
         return hidePlayerModelOnClose;
+    }
+
+    /** 打开界面时玩家模型延迟多久才开始淡入（占动画时长的百分比） */
+    public static int previewFadeDelay() {
+        return previewFadeDelay;
     }
 
     public static String excludedScreens() {
@@ -605,6 +614,11 @@ public final class TransitionConfig {
 
     public static synchronized void setHidePlayerModelOnClose(boolean value) {
         hidePlayerModelOnClose = value;
+        save();
+    }
+
+    public static synchronized void setPreviewFadeDelay(int value) {
+        previewFadeDelay = Math.max(0, Math.min(100, value));
         save();
     }
 

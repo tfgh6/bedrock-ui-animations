@@ -105,6 +105,20 @@ public final class UiTransitionsConfigScreen {
         ConfigCategory layers = builder.getOrCreateCategory(Component.literal("参与动画的部分"));
 
         layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("关闭时内容提前淡出"), TransitionConfig.staggerClose())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("关闭动画里物品与文字比底板略早结束淡出，避免出现空格子"))
+                .setSaveConsumer(TransitionConfig::setStaggerClose)
+                .build());
+
+        layers.addEntry(entries.startIntSlider(Component.literal("玩家模型延迟淡入（%）"),
+                        TransitionConfig.previewFadeDelay(), 0, 100)
+                .setDefaultValue(35)
+                .setTooltip(Component.literal("打开界面时玩家模型等待多久才开始淡入（占动画时长百分比）"))
+                .setSaveConsumer(TransitionConfig::setPreviewFadeDelay)
+                .build());
+
+        layers.addEntry(entries.startBooleanToggle(
                         Component.literal("容器底板跟随动画"), TransitionConfig.animatePanel())
                 .setDefaultValue(true)
                 .setTooltip(Component.literal("背包/箱子的整块底板与槽位背景是否一起滑动淡变。"),
@@ -158,13 +172,6 @@ public final class UiTransitionsConfigScreen {
                 .setSaveConsumer(TransitionConfig::setTabSwitchMs)
                 .build());
 
-        layers.addEntry(entries.startIntSlider(Component.literal("标签切换位移（像素）"),
-                        TransitionConfig.tabSlide(), 0, 200)
-                .setDefaultValue(0)
-                .setTooltip(Component.literal("内容横向滑入的距离，0 = 只淡入不滑动"))
-                .setSaveConsumer(TransitionConfig::setTabSlide)
-                .build());
-
         layers.addEntry(entries.startIntSlider(Component.literal("滚动渐变带高度（像素）"),
                         TransitionConfig.scrollFadeBand(), 16, 300)
                 .setDefaultValue(200)
@@ -184,13 +191,6 @@ public final class UiTransitionsConfigScreen {
                 .setDefaultValue(true)
                 .setTooltip(Component.literal("关闭背包时，界面里的玩家小模型直接不画（不再跟着淡出）"))
                 .setSaveConsumer(TransitionConfig::setHidePlayerModelOnClose)
-                .build());
-
-        layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("滑入方向跟随点击"), TransitionConfig.tabFollowClick())
-                .setDefaultValue(true)
-                .setTooltip(Component.literal("开：点靠左的标签从左滑入；关：固定从右侧滑入"))
-                .setSaveConsumer(TransitionConfig::setTabFollowClick)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
