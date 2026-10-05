@@ -31,29 +31,12 @@ public abstract class CreativeTabSwitchMixin {
         UiTransitions.onTabSelected((Screen) (Object) this);
     }
 
-    /**
-     * 滚动物品列表时也给一次淡入：上下滚动后新出现的物品从半透明淡入，而不是瞬间替换。
-     * 复用换页那套淡变（同一份时长/开关配置），这样物品区的表现是一致的。
-     */
-    @Inject(method = "mouseScrolled(DDDD)Z", at = @At("HEAD"))
-    private void uiTransitionsGridScroll(double mouseX, double mouseY, double scrollX, double scrollY,
-                                         org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
-        if (scrollY != 0.0) {
-            UiTransitions.onGridScroll((Screen) (Object) this);
-        }
-    }
-
-    /** 拖动右侧滚动条：与滚轮同一套淡入 */
-    @Inject(method = "mouseDragged(Lnet/minecraft/client/input/MouseButtonEvent;DD)Z", at = @At("HEAD"))
-    private void uiTransitionsScrollbarDrag(net.minecraft.client.input.MouseButtonEvent event, double dragX,
-                                            double dragY,
-                                            org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
-        UiTransitions.onGridScroll((Screen) (Object) this);
-    }
-
     @Inject(method = EXTRACT, at = @At("HEAD"))
     private void uiTransitions$tabContentBegin(GuiGraphicsExtractor extractor, int mouseX, int mouseY,
                                                float partialTick, CallbackInfo ci) {
+        // 先看滚动位置是否变化（滚轮/拖滚动条/手指滑都覆盖，且点击不会误触发）
+        UiTransitions.onGridScrollIfChanged((Screen) (Object) this,
+                ((CreativeScrollAccessor) (Object) this).uiTransitionsScrollOffset());
         UiTransitions.beginTabContent((Screen) (Object) this, extractor);
     }
 

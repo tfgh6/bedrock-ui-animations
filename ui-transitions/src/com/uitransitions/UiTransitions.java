@@ -61,6 +61,8 @@ public final class UiTransitions {
 
     /** 创造模式分类标签等"换页"动画：记录每屏的开始时间与方向 */
     private static final Map<Screen, TabSwitch> TAB_SWITCH = new WeakHashMap<>();
+    /** 每个界面上一帧的滚动位置，用来判断列表是否真的滚动了 */
+    private static final Map<Screen, Float> LAST_SCROLL = new WeakHashMap<>();
     /** 换页动画时长（毫秒）与横向位移（GUI 像素） */
 
 
@@ -510,6 +512,23 @@ public final class UiTransitions {
      * 滚动物品列表（滚轮或拖动滚动条）：启动一次淡入。
      * 拖动是每帧触发的，如果每次都重置起点，物品会一直停在近乎空白的状态 —— 所以进行中就不重置。
      */
+    /**
+     * 每帧调用：只有滚动位置**真的变了**才启动淡变。
+     * 不能挂在输入事件上 —— 手机上每次点击都会被映射成拖动事件，那样会点哪里都闪。
+     */
+    public static void onGridScrollIfChanged(Screen screen, float scrollOffs) {
+        try {
+            Float previous = LAST_SCROLL.get(screen);
+            LAST_SCROLL.put(screen, scrollOffs);
+            if (previous == null || Math.abs(previous - scrollOffs) < 0.0005F) {
+                return;
+            }
+            onGridScroll(screen);
+        } catch (Throwable t) {
+            report("onGridScrollIfChanged", t);
+        }
+    }
+
     public static void onGridScroll(Screen screen) {
         try {
             TransitionConfig.ensureLoaded();
