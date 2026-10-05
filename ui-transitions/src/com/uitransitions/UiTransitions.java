@@ -557,9 +557,10 @@ public final class UiTransitions {
                 return;
             }
             float eased = TransitionConfig.curve().easeOut(Math.max(0.0F, progress));
-            // 标签切换只做淡入淡出，**不做任何位移**：
-            // 面板里的物品网格与那排快捷栏槽位是同一条绘制路径，一旦平移就会连快捷栏一起动。
-            float alpha = TransitionConfig.fade() ? eased : 1.0F;
+            // 标签切换 / 滚动只做淡变，**不做任何位移**。
+            // 关键：从"下限"开始而不是从 0 开始 —— 整片透明会像闪一下，
+            // 从 0.62 淡到 1 只是一次柔和的浮现。
+            float alpha = TransitionConfig.fade() ? (FADE_FLOOR + (1.0F - FADE_FLOOR) * eased) : 1.0F;
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
             TAB_OFFSET.set(0.0F);
@@ -743,6 +744,9 @@ public final class UiTransitions {
      * 0.92 表示它比底板早约 8% 走完 —— 刚好够避免露出空洞，又几乎看不出先后。
      * 之前是 0.55（早 45%），动画一长就能明显看出"先消失的痕迹"。
      */
+    /** 淡变的起点下限：0 = 整片透明（会闪），0.62 = 柔和浮现 */
+    private static final float FADE_FLOOR = 0.62F;
+
     private static final float CONTENT_FADE_SPAN = 0.92F;
 
     private static float alpha(Screen screen, float progress, boolean contentLayer) {
