@@ -39,8 +39,16 @@ public abstract class CreativeTabSwitchMixin {
     private void uiTransitionsGridScroll(double mouseX, double mouseY, double scrollX, double scrollY,
                                          org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
         if (scrollY != 0.0) {
-            UiTransitions.onTabSelected((Screen) (Object) this);
+            UiTransitions.onGridScroll((Screen) (Object) this);
         }
+    }
+
+    /** 拖动右侧滚动条：与滚轮同一套淡入 */
+    @Inject(method = "mouseDragged(Lnet/minecraft/client/input/MouseButtonEvent;DD)Z", at = @At("HEAD"))
+    private void uiTransitionsScrollbarDrag(net.minecraft.client.input.MouseButtonEvent event, double dragX,
+                                            double dragY,
+                                            org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
+        UiTransitions.onGridScroll((Screen) (Object) this);
     }
 
     @Inject(method = EXTRACT, at = @At("HEAD"))

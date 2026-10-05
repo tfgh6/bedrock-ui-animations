@@ -506,6 +506,28 @@ public final class UiTransitions {
         }
     }
 
+    /**
+     * 滚动物品列表（滚轮或拖动滚动条）：启动一次淡入。
+     * 拖动是每帧触发的，如果每次都重置起点，物品会一直停在近乎空白的状态 —— 所以进行中就不重置。
+     */
+    public static void onGridScroll(Screen screen) {
+        try {
+            TransitionConfig.ensureLoaded();
+            if (screen == null || !TransitionConfig.animateTabSwitch()) {
+                return;
+            }
+            TabSwitch existing = TAB_SWITCH.get(screen);
+            if (existing != null
+                    && (System.nanoTime() - existing.startNanos)
+                    < TransitionConfig.tabSwitchMs() * 1_000_000L) {
+                return;
+            }
+            TAB_SWITCH.put(screen, new TabSwitch(System.nanoTime(), 0.0F));
+        } catch (Throwable t) {
+            report("onGridScroll", t);
+        }
+    }
+
     /** 鼠标是否在屏幕左半边（用来决定内容从哪一侧滑入） */
     private static boolean pointerOnLeftHalf() {
         try {
