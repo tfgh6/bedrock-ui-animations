@@ -1,11 +1,11 @@
 modLoader = "javafml"
 loaderVersion = "[1,)"
-license = "MIT"
+license = "Unlicense"
 iconFile = "assets/ui_transitions/icon.png"
 
 [[mods]]
 modId = "ui_transitions"
-version = "1.0.5"
+version = "1.0.6"
 displayName = "Bedrock UI Animations"
 logoFile = "assets/ui_transitions/icon.png"
 description = '''

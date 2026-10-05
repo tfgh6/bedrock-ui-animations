@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "id": "ui_transitions",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "name": "Bedrock UI Animations",
   "description": "Bedrock-style slide + fade transitions for container and menu UIs, with per-layer toggles",
   "authors": [
     "KurumiのZaphkiel",
     "JiaWang-sama"
   ],
-  "license": "MIT",
+  "license": "Unlicense",
   "icon": "assets/ui_transitions/icon.png",
   "environment": "client",
   "depends": {

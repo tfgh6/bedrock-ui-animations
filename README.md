@@ -107,6 +107,6 @@ verify-uit/          离线断言（状态机 / 注入目标 / 各项开关行�
 ## 作者与许可
 
 - 作者：**KurumiのZaphkiel**、**JiaWang-sama**
-- 许可：[MIT](LICENSE)
+- 许可：**公共领域（[The Unlicense](LICENSE)）** —— 你可以随意复制、修改、商用、再发布，**无需保留任何署名或版权声明**，也无需注明来源。想用就用，不必问。
 
 欢迎提 [Issue](https://github.com/tfgh6/bedrock-ui-animations/issues) 反馈问题或想要的界面适配。如果你在某个界面上看到异常（该动没动、不该动却在动），请附上界面名称或截图，用配置里的 `extraScreens` / `excludedScreens` 可以直接调整。
