@@ -688,13 +688,7 @@ public final class UiTransitions {
             SLOT_SAVED_ALPHA.set(WINDOW_ALPHA.get());
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
-            // iOS 列表手感：越靠进入侧的格子画得越低一点，随滚动滑到位
-            float slide = (1.0F - ratio) * SLOT_SLIDE_PX * (scrollDirection > 0 ? 1.0F : -1.0F);
-            if (Math.abs(slide) > 0.05F) {
-                extractor.pose().pushMatrix();
-                extractor.pose().translate(0.0F, slide);
-                SLOT_SLIDE_DEPTH.set(SLOT_SLIDE_DEPTH.get() + 1);
-            }
+            // 逐格位移已永久撤除：在这套渲染管线里推送与弹栈时机对不上，会导致整片漂移
         } catch (Throwable t) {
             report("applySlotFade", t);
         }
@@ -702,11 +696,7 @@ public final class UiTransitions {
 
     public static void clearSlotFade(GuiGraphicsExtractor extractor) {
         try {
-            // 用深度计数弹出：推了几次就弹几次，结构上不可能累加偏移
-            while (SLOT_SLIDE_DEPTH.get() > 0) {
-                extractor.pose().popMatrix();
-                SLOT_SLIDE_DEPTH.set(SLOT_SLIDE_DEPTH.get() - 1);
-            }
+            // 不再需要弹栈（已无位移）
             Float saved = SLOT_SAVED_ALPHA.get();
             if (saved != null) {
                 SLOT_SAVED_ALPHA.remove();
