@@ -246,7 +246,9 @@ public final class UiTransitions {
 
     /** 内容层开始：槽内物品、标题文字等。 */
     public static void beginContentLayer(Screen screen, GuiGraphicsExtractor extractor) {
-        HIDE_PREVIEW = isClosing(screen);
+        // 只针对背包/容器界面里的玩家模型；书、地图等其它画中画预览照旧渐隐
+        HIDE_PREVIEW = isClosing(screen)
+                && screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
         try {
             FRAME_ALPHA.set(1.0F);      // 同上：非动画帧一律按不透明处理
             synchronized (ITEM_ALPHAS) {
