@@ -14,7 +14,8 @@
     "GuiRendererMixin",
     "PictureInPictureRendererMixin",
     "CreativeTabSwitchMixin",
-    "HotbarTabExcludeMixin"
+    "HotbarTabExcludeMixin",
+    "HotbarSlotTabStaticMixin"
   ],
   "injectors": {
     "defaultRequire": 0
