@@ -671,13 +671,7 @@ public final class UiTransitions {
             SLOT_SAVED_ALPHA.set(WINDOW_ALPHA.get());
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
-            // iOS 列表那种手感：越靠进入侧的格子，画得越低一点，随滚动滑到位
-            float slide = (1.0F - ratio) * SLOT_SLIDE_PX * (scrollDirection > 0 ? 1.0F : -1.0F);
-            if (Math.abs(slide) > 0.05F) {
-                extractor.pose().pushMatrix();
-                extractor.pose().translate(0.0F, slide);
-                SLOT_SLIDE_PUSHED.set(true);
-            }
+            // 注：逐格上滑已撤掉 —— 矩阵压栈/弹栈不配平会让物品整片偏移，只保留逐格淡变
         } catch (Throwable t) {
             report("applySlotFade", t);
         }
