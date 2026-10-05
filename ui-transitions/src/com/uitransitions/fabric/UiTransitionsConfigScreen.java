@@ -153,14 +153,14 @@ public final class UiTransitionsConfigScreen {
 
         layers.addEntry(entries.startIntSlider(Component.literal("标签切换时长（毫秒）"),
                         TransitionConfig.tabSwitchMs(), 50, 1000)
-                .setDefaultValue(220)
+                .setDefaultValue(300)
                 .setTooltip(Component.literal("换页动画持续多久，默认 220（比开关界面的 300 更利落）"))
                 .setSaveConsumer(TransitionConfig::setTabSwitchMs)
                 .build());
 
         layers.addEntry(entries.startIntSlider(Component.literal("标签切换位移（像素）"),
                         TransitionConfig.tabSlide(), 0, 200)
-                .setDefaultValue(56)
+                .setDefaultValue(120)
                 .setTooltip(Component.literal("内容横向滑入的距离，0 = 只淡入不滑动"))
                 .setSaveConsumer(TransitionConfig::setTabSlide)
                 .build());

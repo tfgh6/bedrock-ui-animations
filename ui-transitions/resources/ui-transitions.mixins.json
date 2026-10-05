@@ -13,7 +13,8 @@
     "GuiItemRenderStateMixin",
     "GuiRendererMixin",
     "PictureInPictureRendererMixin",
-    "CreativeTabSwitchMixin"
+    "CreativeTabSwitchMixin",
+    "HotbarTabStaticMixin"
   ],
   "injectors": {
     "defaultRequire": 0

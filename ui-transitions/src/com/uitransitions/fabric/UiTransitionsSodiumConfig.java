@@ -109,6 +109,18 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         layers.addOption(bool(builder, "animate_subtitles", "音效字幕跟随动画",
                 "字幕在背景层里顺带绘制，默认不参与动画（否则打开背包时字幕会跟着动）", false,
                 TransitionConfig.animateSubtitles(), TransitionConfig::setAnimateSubtitles));
+        layers.addOption(bool(builder, "animate_tab_switch", "分类标签切换动画",
+                "点创造模式物品栏的分类标签时，物品区从点击方向滑入（底板与快捷栏不动）", true,
+                TransitionConfig.animateTabSwitch(), TransitionConfig::setAnimateTabSwitch));
+        layers.addOption(intOption(builder, "tab_switch_ms", "标签切换时长", "换页动画毫秒数，默认 300",
+                300, 50, 1000, 10, TransitionConfig.tabSwitchMs(),
+                TransitionConfig::setTabSwitchMs, value -> tr(value + " 毫秒")));
+        layers.addOption(intOption(builder, "tab_slide", "标签切换位移", "内容横向滑入距离（像素），0 = 只淡入",
+                120, 0, 200, 4, TransitionConfig.tabSlide(),
+                TransitionConfig::setTabSlide, value -> tr(value + " 像素")));
+        layers.addOption(bool(builder, "tab_follow_click", "滑入方向跟随点击",
+                "关掉则固定从右侧滑入", true,
+                TransitionConfig.tabFollowClick(), TransitionConfig::setTabFollowClick));
         layers.addOption(bool(builder, "animate_same_type_switch", "同类界面切换也做动画",
                 "创造模式分类标签、配方书翻页这类同界面换页默认直接切换", false,
                 TransitionConfig.animateSameTypeSwitch(), TransitionConfig::setAnimateSameTypeSwitch));
@@ -154,6 +166,8 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "animate_dim" -> TransitionConfig.animateDim();
             case "animate_subtitles" -> TransitionConfig.animateSubtitles();
             case "animate_same_type_switch" -> TransitionConfig.animateSameTypeSwitch();
+            case "animate_tab_switch" -> TransitionConfig.animateTabSwitch();
+            case "tab_follow_click" -> TransitionConfig.tabFollowClick();
             case "overlay_mods_fade_only" -> TransitionConfig.overlayModsFadeOnly();
             case "animate_all_screens" -> TransitionConfig.animateAllScreens();
             case "fade" -> TransitionConfig.fade();
@@ -170,6 +184,8 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "offset" -> Math.round(TransitionConfig.offset());
             case "jelly" -> Math.round(TransitionConfig.jelly() * 100.0F);
             case "curve" -> curveIndex(TransitionConfig.curve());
+            case "tab_switch_ms" -> TransitionConfig.tabSwitchMs();
+            case "tab_slide" -> TransitionConfig.tabSlide();
             default -> 0;
         };
     }
