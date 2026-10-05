@@ -166,15 +166,15 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
         layers.addEntry(entries.startIntSlider(Component.literal("滚动渐变带高度（像素）"),
-                        TransitionConfig.scrollFadeBand(), 16, 160)
-                .setDefaultValue(90)
+                        TransitionConfig.scrollFadeBand(), 16, 300)
+                .setDefaultValue(200)
                 .setTooltip(Component.literal("滚动时多高范围内的格子参与渐变，越大越明显，默认 90"))
                 .setSaveConsumer(TransitionConfig::setScrollFadeBand)
                 .build());
 
         layers.addEntry(entries.startIntSlider(Component.literal("滚动渐变最低透明度（%）"),
                         TransitionConfig.scrollFadeMin(), 0, 100)
-                .setDefaultValue(10)
+                .setDefaultValue(0)
                 .setTooltip(Component.literal("边缘格子最淡到什么程度，越小越明显，默认 10"))
                 .setSaveConsumer(TransitionConfig::setScrollFadeMin)
                 .build());

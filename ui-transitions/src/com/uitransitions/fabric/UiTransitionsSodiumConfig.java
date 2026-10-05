@@ -119,11 +119,11 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
                 0, 0, 200, 4, TransitionConfig.tabSlide(),
                 TransitionConfig::setTabSlide, value -> tr(value + " 像素")));
         layers.addOption(intOption(builder, "scroll_fade_band", "滚动渐变带高度",
-                "滚动时多高范围内的格子参与渐变，越大越明显", 90, 16, 160, 2,
+                "滚动时多高范围内的格子参与渐变，越大越明显", 200, 16, 300, 2,
                 TransitionConfig.scrollFadeBand(), TransitionConfig::setScrollFadeBand,
                 value -> tr(value + " 像素")));
         layers.addOption(intOption(builder, "scroll_fade_min", "滚动渐变最低透明度",
-                "边缘格子最淡到什么程度（%），越小越明显", 10, 0, 100, 5,
+                "边缘格子最淡到什么程度（%），越小越明显", 0, 0, 100, 5,
                 TransitionConfig.scrollFadeMin(), TransitionConfig::setScrollFadeMin,
                 value -> tr(value + "%")));
         layers.addOption(bool(builder, "hide_player_model_on_close", "关闭时隐藏玩家模型",
