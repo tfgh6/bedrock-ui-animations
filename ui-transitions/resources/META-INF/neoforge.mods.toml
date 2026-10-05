@@ -5,7 +5,7 @@ iconFile = "assets/ui_transitions/icon.png"
 
 [[mods]]
 modId = "ui_transitions"
-version = "1.2.7"
+version = "1.2.8"
 displayName = "Bedrock UI Animations"
 logoFile = "assets/ui_transitions/icon.png"
 description = '''

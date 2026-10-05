@@ -49,6 +49,8 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
     /** 当前这一帧的界面是否已收到关闭指令（收到就立即隐藏玩家模型） */
     private static volatile boolean HIDE_PREVIEW = false;
+    /** 本帧内容层整体的淡变透明度（帧级：直到下一帧开始才复位，供 HUD 快捷栏判断用） */
+    private static volatile float FRAME_FADE_ALPHA = 1.0F;
     /** 打开界面时，玩家模型的透明度覆盖值；负数表示不干预 */
     private static volatile float PREVIEW_ALPHA_OVERRIDE = -1.0F;
     private static final ThreadLocal<Boolean> TAB_PUSHED = ThreadLocal.withInitial(() -> false);
@@ -248,6 +250,7 @@ public final class UiTransitions {
 
     /** 内容层开始：槽内物品、标题文字等。 */
     public static void beginContentLayer(Screen screen, GuiGraphicsExtractor extractor) {
+        FRAME_FADE_ALPHA = 1.0F;      // 新的一帧开始
         // 只针对背包/容器界面里的玩家模型；书、地图等其它画中画预览照旧渐隐
         boolean container = screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
         HIDE_PREVIEW = isClosing(screen) && container;
@@ -623,6 +626,7 @@ public final class UiTransitions {
             FRAME_ALPHA.set(alpha);
             TAB_OFFSET.set(0.0F);
             TAB_SLIDE_ACTIVE.set(eased);   // 逐格渐变随整体淡变一起推进
+            FRAME_FADE_ALPHA = alpha;      // 帧级：界面画完后 HUD 快捷栏还能读到
         } catch (Throwable t) {
             report("beginTabContent", t);
         }
@@ -631,7 +635,7 @@ public final class UiTransitions {
     /** 快捷栏：在换页动画期间抵消横向位移（底部那排格子不该跟着滑） */
     public static void pauseForTabStatic(GuiGraphicsExtractor extractor) {
         try {
-            if (TAB_SLIDE_ACTIVE.get() >= 0.999F || TAB_STATIC.get()) {
+            if (FRAME_FADE_ALPHA >= 0.999F || TAB_STATIC.get()) {
                 return;
             }
             float offset = TAB_OFFSET.get();
