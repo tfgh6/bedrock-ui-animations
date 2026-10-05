@@ -48,6 +48,8 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> HUD_PAUSED = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> TAB_PUSHED = ThreadLocal.withInitial(() -> false);
+    /** >0 表示逐格渐变正在进行（值为该次淡变的整体进度） */
+    private static final ThreadLocal<Float> TAB_SLIDE_ACTIVE = ThreadLocal.withInitial(() -> 1.0F);
     private static final ThreadLocal<Boolean> TAB_STATIC = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Float> TAB_OFFSET = ThreadLocal.withInitial(() -> 0.0F);
     /**
@@ -63,6 +65,13 @@ public final class UiTransitions {
     private static final Map<Screen, TabSwitch> TAB_SWITCH = new WeakHashMap<>();
     /** 每个界面上一帧的滚动位置，用来判断列表是否真的滚动了 */
     private static final Map<Screen, Float> LAST_SCROLL = new WeakHashMap<>();
+    /** 滚动方向：+1 = 内容向上走（新物品从下方进入），-1 = 反向 */
+    private static volatile float scrollDirection = 1.0F;
+    /** 逐格渐变带的高度（像素）：越靠近进入侧越淡 */
+    private static final float SLOT_FADE_BAND = 56.0F;
+    /** 逐格渐变的最低透明度 */
+    private static final float SLOT_FADE_MIN = 0.25F;
+    private static final ThreadLocal<Float> SLOT_SAVED_ALPHA = new ThreadLocal<>();
     /** 换页动画时长（毫秒）与横向位移（GUI 像素） */
 
 
@@ -523,6 +532,7 @@ public final class UiTransitions {
             if (previous == null || Math.abs(previous - scrollOffs) < 0.0005F) {
                 return;
             }
+            scrollDirection = scrollOffs > previous ? 1.0F : -1.0F;
             onGridScroll(screen);
         } catch (Throwable t) {
             report("onGridScrollIfChanged", t);
@@ -583,6 +593,7 @@ public final class UiTransitions {
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
             TAB_OFFSET.set(0.0F);
+            TAB_SLIDE_ACTIVE.set(eased);   // 逐格渐变随整体淡变一起推进
         } catch (Throwable t) {
             report("beginTabContent", t);
         }
@@ -622,12 +633,54 @@ public final class UiTransitions {
         }
     }
 
+    /**
+     * 逐格渐变：按槽位的纵坐标算透明度。
+     * 新物品从下方进入时，越靠下越淡；从上往下滚时则以顶部为进入侧。
+     */
+    public static void applySlotFade(int slotY) {
+        try {
+            float bandAlpha = activeSlotFadeAlpha();
+            if (bandAlpha >= 0.999F) {
+                return;
+            }
+            // 进入侧：向下滚动时物品向上走、新格从底部进来
+            float distance = scrollDirection > 0 ? slotY : (1000.0F - slotY);
+            float ratio = Math.max(0.0F, Math.min(1.0F, distance / SLOT_FADE_BAND));
+            float alpha = SLOT_FADE_MIN + (1.0F - SLOT_FADE_MIN) * ratio;
+            alpha = Math.max(alpha, bandAlpha);
+            SLOT_SAVED_ALPHA.set(WINDOW_ALPHA.get());
+            WINDOW_ALPHA.set(alpha);
+            FRAME_ALPHA.set(alpha);
+        } catch (Throwable t) {
+            report("applySlotFade", t);
+        }
+    }
+
+    public static void clearSlotFade() {
+        try {
+            Float saved = SLOT_SAVED_ALPHA.get();
+            if (saved != null) {
+                SLOT_SAVED_ALPHA.remove();
+                WINDOW_ALPHA.set(saved);
+                FRAME_ALPHA.set(saved);
+            }
+        } catch (Throwable t) {
+            report("clearSlotFade", t);
+        }
+    }
+
+    /** 当前是否处于逐格渐变窗口；返回整体的淡变透明度（1 = 不介入） */
+    private static float activeSlotFadeAlpha() {
+        return TAB_SLIDE_ACTIVE.get();
+    }
+
     public static void endTabContent(Screen screen, GuiGraphicsExtractor extractor) {
         try {
             if (TAB_PUSHED.get()) {
                 extractor.pose().popMatrix();
                 TAB_PUSHED.set(false);
             }
+            TAB_SLIDE_ACTIVE.set(1.0F);
             WINDOW_ALPHA.set(1.0F);
             FRAME_ALPHA.set(1.0F);
         } catch (Throwable t) {

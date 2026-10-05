@@ -15,7 +15,8 @@
     "PictureInPictureRendererMixin",
     "CreativeTabSwitchMixin",
     "HotbarTabExcludeMixin",
-    "CreativeScrollAccessor"
+    "CreativeScrollAccessor",
+    "SlotScrollFadeMixin"
   ],
   "injectors": {
     "defaultRequire": 0
