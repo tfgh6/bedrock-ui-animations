@@ -180,6 +180,13 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("关闭界面时隐藏玩家模型"), TransitionConfig.hidePlayerModelOnClose())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("关闭背包时，界面里的玩家小模型直接不画（不再跟着淡出）"))
+                .setSaveConsumer(TransitionConfig::setHidePlayerModelOnClose)
+                .build());
+
+        layers.addEntry(entries.startBooleanToggle(
                         Component.literal("滑入方向跟随点击"), TransitionConfig.tabFollowClick())
                 .setDefaultValue(true)
                 .setTooltip(Component.literal("开：点靠左的标签从左滑入；关：固定从右侧滑入"))

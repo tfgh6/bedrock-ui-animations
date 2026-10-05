@@ -126,6 +126,9 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
                 "边缘格子最淡到什么程度（%），越小越明显", 10, 0, 100, 5,
                 TransitionConfig.scrollFadeMin(), TransitionConfig::setScrollFadeMin,
                 value -> tr(value + "%")));
+        layers.addOption(bool(builder, "hide_player_model_on_close", "关闭时隐藏玩家模型",
+                "关闭界面时玩家小模型直接不画", true,
+                TransitionConfig.hidePlayerModelOnClose(), TransitionConfig::setHidePlayerModelOnClose));
         layers.addOption(bool(builder, "tab_follow_click", "滑入方向跟随点击",
                 "关掉则固定从右侧滑入", true,
                 TransitionConfig.tabFollowClick(), TransitionConfig::setTabFollowClick));
@@ -175,6 +178,7 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "animate_subtitles" -> TransitionConfig.animateSubtitles();
             case "animate_same_type_switch" -> TransitionConfig.animateSameTypeSwitch();
             case "animate_tab_switch" -> TransitionConfig.animateTabSwitch();
+            case "hide_player_model_on_close" -> TransitionConfig.hidePlayerModelOnClose();
             case "tab_follow_click" -> TransitionConfig.tabFollowClick();
             case "overlay_mods_fade_only" -> TransitionConfig.overlayModsFadeOnly();
             case "animate_all_screens" -> TransitionConfig.animateAllScreens();

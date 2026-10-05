@@ -56,6 +56,7 @@ public final class TransitionConfig {
     private static volatile boolean tabFollowClick = true;
     private static volatile int scrollFadeBand = 90;
     private static volatile int scrollFadeMin = 10;
+    private static volatile boolean hidePlayerModelOnClose = true;
     private static volatile String excludedScreens = "";
     private static volatile Set<String> excludedSet = Collections.emptySet();
     private static volatile String extraScreens = DEFAULT_EXTRA_SCREENS;
@@ -204,6 +205,7 @@ public final class TransitionConfig {
         tabFollowClick = readBoolean(properties, "tabFollowClick", tabFollowClick);
         scrollFadeBand = clampBand(readInt(properties, "scrollFadeBand", scrollFadeBand));
         scrollFadeMin = clampMin(readInt(properties, "scrollFadeMin", scrollFadeMin));
+        hidePlayerModelOnClose = readBoolean(properties, "hidePlayerModelOnClose", hidePlayerModelOnClose);
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
         curveId = Curve.byId(properties.getProperty("curve", curveId)).id();
@@ -246,6 +248,7 @@ public final class TransitionConfig {
         properties.setProperty("tabFollowClick", Boolean.toString(tabFollowClick));
         properties.setProperty("scrollFadeBand", Integer.toString(scrollFadeBand));
         properties.setProperty("scrollFadeMin", Integer.toString(scrollFadeMin));
+        properties.setProperty("hidePlayerModelOnClose", Boolean.toString(hidePlayerModelOnClose));
         properties.setProperty("excludedScreens", excludedScreens == null ? "" : excludedScreens);
         properties.setProperty("extraScreens", extraScreens == null ? "" : extraScreens);
         try (FileOutputStream out = new FileOutputStream(file)) {
@@ -280,6 +283,7 @@ public final class TransitionConfig {
         tabFollowClick = true;
         scrollFadeBand = 90;
         scrollFadeMin = 10;
+        hidePlayerModelOnClose = true;
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;
         curveId = Curve.CUBIC.id();
@@ -404,6 +408,11 @@ public final class TransitionConfig {
     /** 滚动逐格渐变的最低透明度（百分比）：越小越明显 */
     public static int scrollFadeMin() {
         return scrollFadeMin;
+    }
+
+    /** 关闭界面时是否直接隐藏玩家模型（布娃娃） */
+    public static boolean hidePlayerModelOnClose() {
+        return hidePlayerModelOnClose;
     }
 
     public static String excludedScreens() {
@@ -591,6 +600,11 @@ public final class TransitionConfig {
 
     public static synchronized void setScrollFadeMin(int value) {
         scrollFadeMin = clampMin(value);
+        save();
+    }
+
+    public static synchronized void setHidePlayerModelOnClose(boolean value) {
+        hidePlayerModelOnClose = value;
         save();
     }
 

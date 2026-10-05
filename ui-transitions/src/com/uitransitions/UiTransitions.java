@@ -72,6 +72,9 @@ public final class UiTransitions {
     private static final int HOTBAR_FIRST = 36;
     private static final int HOTBAR_LAST = 44;
     private static final ThreadLocal<Float> SLOT_SAVED_ALPHA = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> SLOT_SLIDE_PUSHED = ThreadLocal.withInitial(() -> false);
+    /** 逐格渐变时新格额外上滑的距离（像素） */
+    private static final float SLOT_SLIDE_PX = 14.0F;
     /** 换页动画时长（毫秒）与横向位移（GUI 像素） */
 
 
@@ -637,7 +640,7 @@ public final class UiTransitions {
      * 逐格渐变：按槽位的纵坐标算透明度。
      * 新物品从下方进入时，越靠下越淡；从上往下滚时则以顶部为进入侧。
      */
-    public static void applySlotFade(int slotY, int slotIndex) {
+    public static void applySlotFade(GuiGraphicsExtractor extractor, int slotY, int slotIndex) {
         try {
             if (slotIndex >= HOTBAR_FIRST && slotIndex <= HOTBAR_LAST) {
                 return;      // 玩家快捷栏那一排：保持原版，不淡变
@@ -656,13 +659,24 @@ public final class UiTransitions {
             SLOT_SAVED_ALPHA.set(WINDOW_ALPHA.get());
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
+            // iOS 列表那种手感：越靠进入侧的格子，画得越低一点，随滚动滑到位
+            float slide = (1.0F - ratio) * SLOT_SLIDE_PX * (scrollDirection > 0 ? 1.0F : -1.0F);
+            if (Math.abs(slide) > 0.05F) {
+                extractor.pose().pushMatrix();
+                extractor.pose().translate(0.0F, slide);
+                SLOT_SLIDE_PUSHED.set(true);
+            }
         } catch (Throwable t) {
             report("applySlotFade", t);
         }
     }
 
-    public static void clearSlotFade() {
+    public static void clearSlotFade(GuiGraphicsExtractor extractor) {
         try {
+            if (SLOT_SLIDE_PUSHED.get()) {
+                extractor.pose().popMatrix();
+                SLOT_SLIDE_PUSHED.set(false);
+            }
             Float saved = SLOT_SAVED_ALPHA.get();
             if (saved != null) {
                 SLOT_SAVED_ALPHA.remove();
@@ -716,10 +730,29 @@ public final class UiTransitions {
             if (!TransitionConfig.fade()) {
                 return;
             }
+            if (TransitionConfig.hidePlayerModelOnClose() && isPlayerPreview(state)
+                    && PUSHED_SCREEN.get() != null && isClosing(PUSHED_SCREEN.get())) {
+                WINDOW_ALPHA.set(0.0F);      // 关闭动画一开始：玩家模型直接不画
+                PIP_BLITTING.set(true);
+                return;
+            }
             WINDOW_ALPHA.set(FRAME_ALPHA.get());
             PIP_BLITTING.set(true);
         } catch (Throwable t) {
             report("beginPipBlit", t);
+        }
+    }
+
+    /** 是否是玩家模型那类画中画预览（背包里的布娃娃） */
+    private static boolean isPlayerPreview(Object state) {
+        try {
+            if (state == null) {
+                return false;
+            }
+            String name = state.getClass().getSimpleName();
+            return name.contains("Entity") || name.contains("Player");
+        } catch (Throwable t) {
+            return false;
         }
     }
 

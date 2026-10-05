@@ -26,12 +26,12 @@ public abstract class SlotScrollFadeMixin {
     @Inject(method = EXTRACT_SLOT, at = @At("HEAD"))
     private void uiTransitionsSlotFadeBegin(GuiGraphicsExtractor extractor, Slot slot, int mouseX, int mouseY,
                                             CallbackInfo ci) {
-        UiTransitions.applySlotFade(slot == null ? 0 : slot.y, slot == null ? -1 : slot.index);
+        UiTransitions.applySlotFade(extractor, slot == null ? 0 : slot.y, slot == null ? -1 : slot.index);
     }
 
     @Inject(method = EXTRACT_SLOT, at = @At("RETURN"))
     private void uiTransitionsSlotFadeEnd(GuiGraphicsExtractor extractor, Slot slot, int mouseX, int mouseY,
                                           CallbackInfo ci) {
-        UiTransitions.clearSlotFade();
+        UiTransitions.clearSlotFade(extractor);
     }
 }
