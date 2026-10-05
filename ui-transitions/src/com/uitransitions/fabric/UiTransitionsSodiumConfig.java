@@ -115,8 +115,8 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         layers.addOption(intOption(builder, "tab_switch_ms", "标签切换时长", "换页动画毫秒数，默认 300",
                 300, 50, 1000, 10, TransitionConfig.tabSwitchMs(),
                 TransitionConfig::setTabSwitchMs, value -> tr(value + " 毫秒")));
-        layers.addOption(intOption(builder, "tab_slide", "标签切换位移", "内容横向滑入距离（像素），0 = 只淡入",
-                120, 0, 200, 4, TransitionConfig.tabSlide(),
+        layers.addOption(intOption(builder, "tab_slide", "标签切换位移", "内容横向滑入距离（像素），0 = 只淡入淡出（默认）",
+                0, 0, 200, 4, TransitionConfig.tabSlide(),
                 TransitionConfig::setTabSlide, value -> tr(value + " 像素")));
         layers.addOption(bool(builder, "tab_follow_click", "滑入方向跟随点击",
                 "关掉则固定从右侧滑入", true,
