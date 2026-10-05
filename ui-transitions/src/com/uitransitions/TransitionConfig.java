@@ -45,7 +45,7 @@ public final class TransitionConfig {
     private static volatile boolean animatePanel = true;
     private static volatile boolean animateDim = false;
     private static volatile boolean animateSubtitles = false;
-    private static volatile boolean animateSameTypeSwitch = false;
+    private static volatile boolean animateSameTypeSwitch = true;
     private static volatile float jelly = 0.0F;
     private static volatile boolean overlayModsFadeOnly = true;
     private static volatile boolean allowLookDuringClose = true;
@@ -251,7 +251,7 @@ public final class TransitionConfig {
         animatePanel = true;
         animateDim = false;
         animateSubtitles = false;
-        animateSameTypeSwitch = false;
+        animateSameTypeSwitch = true;
         jelly = 0.0F;
         overlayModsFadeOnly = true;
         allowLookDuringClose = true;
@@ -319,7 +319,7 @@ public final class TransitionConfig {
 
     /**
      * 同类界面之间直接切换（例如创造模式物品栏切换分类标签、配方书翻页）是否也做动画。
-     * 默认 false：这类"换页"是同一个界面的内部操作，做滑入滑出会很突兀。
+     * 默认 true：创造模式分类标签这类"换页"也做滑动过渡；不想要可以关掉。
      */
     public static boolean animateSameTypeSwitch() {
         return animateSameTypeSwitch;
