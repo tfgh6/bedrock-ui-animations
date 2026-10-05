@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "ui_transitions",
+  "version": "1.0.5",
+  "name": "Bedrock UI Animations",
+  "description": "Bedrock-style slide + fade transitions for container and menu UIs, with per-layer toggles",
+  "authors": [
+    "KurumiのZaphkiel",
+    "JiaWang-sama"
+  ],
+  "license": "MIT",
+  "icon": "assets/ui_transitions/icon.png",
+  "environment": "client",
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": ">=26.3"
+  },
+  "entrypoints": {
+    "client": [
+      "com.uitransitions.fabric.UiTransitionsFabric"
+    ],
+    "modmenu": [
+      "com.uitransitions.fabric.UiTransitionsModMenu"
+    ],
+    "sodium:config_api_user": [
+      "com.uitransitions.fabric.UiTransitionsSodiumConfig"
+    ]
+  },
+  "recommends": {
+    "modmenu": "*",
+    "cloth-config": "*",
+    "sodium": "*"
+  },
+  "suggests": {
+    "jei": "*",
+    "emi": "*",
+    "roughlyenoughitems": "*"
+  },
+  "mixins": [
+    "ui-transitions.mixins.json"
+  ]
+}

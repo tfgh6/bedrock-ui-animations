@@ -1,0 +1,40 @@
+plugins {
+    // MC 26.1+ 不再混淆，Loom 不需要 mappings 依赖
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    // Loom 会自动带上 Fabric / Mojang 的仓库；这里只放额外依赖的仓库
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+    // 本模组不需要 Fabric API：只用 loader + Mixin（Mixin 由 loader 自带）
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 25
+    it.options.encoding = 'UTF-8'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+// 让 runClient 直接带上可视化测试开关（只有设置 -PvisualTest 时才生效）
+tasks.named('runClient') {
+    if (project.hasProperty('visualTest')) {
+        jvmArgs "-Duitransitions.visualTest=true",
+                "-Duitransitions.visualTest.dir=${project.projectDir}/visual-out"
+    }
+}

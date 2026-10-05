@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "ui_transitions_visualtest",
+  "version": "1.0.0",
+  "name": "UI Transitions Visual Test (dev only)",
+  "description": "开发期截图时间线驱动：自动进入世界、打开容器界面、按时间点抓帧。不装到正式存档。",
+  "license": "MIT",
+  "environment": "client",
+  "depends": {
+    "fabricloader": ">=0.16.0"
+  },
+  "entrypoints": {
+    "client": [
+      "com.uitransitions.visualtest.VisualTestFabric"
+    ]
+  }
+}

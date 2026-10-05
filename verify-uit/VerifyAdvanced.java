@@ -1,0 +1,326 @@
+import com.uitransitions.TransitionConfig;
+import com.uitransitions.UiTransitions;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Gui;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import org.joml.Matrix3x2fStack;
+
+public class VerifyAdvanced {
+
+    private static int failures;
+
+    public static void main(String[] args) throws Exception {
+        System.out.println("=== UI Transitions 进阶行为验证 ===");
+
+        Gui gui = Minecraft.getInstance().gui;
+        GuiGraphicsExtractor extractor = new GuiGraphicsExtractor();
+        AbstractContainerScreen container = new EmptyContainer();
+        Screen plain = new Screen();
+        Screen jeiLike = new mezz.jei.TestScreen();
+
+        TransitionConfig.ensureLoaded();
+        TransitionConfig.resetToDefaults();
+        TransitionConfig.setDurationMs(2000);
+
+        // ---------- 1) JEI 一类界面适配 ----------
+        check("普通界面默认不参与", !UiTransitions.shouldAnimate(plain), "false");
+        check("容器界面参与", UiTransitions.shouldAnimate(container), "true");
+        check("JEI 风格界面（extraScreens 前缀）参与", UiTransitions.shouldAnimate(jeiLike), "true");
+        TransitionConfig.setExtraScreens("");
+        check("清空 extraScreens 后 JEI 风格界面不参与", !UiTransitions.shouldAnimate(jeiLike), "false");
+        TransitionConfig.setExtraScreens(TransitionConfig.DEFAULT_EXTRA_SCREENS);
+        check("排除列表优先生效", excludedWorks(plain), "已排除的界面不参与");
+
+        // ---------- 2) 缓动曲线 ----------
+        float cubicMid = curveValue(container, gui, extractor, "cubic");
+        float linearMid = curveValue(container, gui, extractor, "linear");
+        check("曲线可切换（linear 与 cubic 同进度位移不同）",
+                Math.abs(cubicMid - linearMid) > 1.0F,
+                "cubic=" + cubicMid + " linear=" + linearMid);
+        TransitionConfig.setCurveId("cubic");
+
+        // ---------- 3) 文字 / 物品 独立开关 ----------
+        TransitionConfig.setFadeText(false);
+        TransitionConfig.setFadeItems(false);
+        TransitionConfig.setFadeDim(false);
+        openPanel(gui, container);
+        UiTransitions.beginContentLayer(container, extractor);
+        int textColor = UiTransitions.applyAlphaText(0xFFFFFFFF);
+        int blitColor = UiTransitions.applyAlphaBlit(0xFFFFFFFF);
+        check("fadeText=false 时文字不淡变", (textColor >>> 24) == 255, "alpha=" + (textColor >>> 24));
+        check("贴图/底板仍淡变", (blitColor >>> 24) < 255, "alpha=" + (blitColor >>> 24));
+        Object itemState = new Object();
+        UiTransitions.tagItem(itemState);
+        UiTransitions.beginItemSubmit(itemState);
+        check("fadeItems=false 时物品不淡变",
+                (UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24) == 255,
+                "alpha=" + (UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24));
+        UiTransitions.endItemSubmit(itemState);
+        UiTransitions.endContentLayer(container, extractor);
+        TransitionConfig.setFadeText(true);
+        TransitionConfig.setFadeItems(true);
+        TransitionConfig.setFadeDim(true);
+
+        // ---------- 4) 遮罩 / 字幕的抵消行为 ----------
+        openPanel(gui, container);
+        UiTransitions.beginBackgroundLayer(container, extractor);
+        UiTransitions.pauseForStaticRegion(extractor);
+        int veilFaded = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.resumeAfterStaticRegion(extractor);
+        check("fadeDim=true 时遮罩随动画淡出", veilFaded < 255, "遮罩 alpha=" + veilFaded);
+        TransitionConfig.setFadeDim(false);
+        UiTransitions.beginBackgroundLayer(container, extractor);
+        UiTransitions.pauseForStaticRegion(extractor);
+        int veilSolid = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.resumeAfterStaticRegion(extractor);
+        check("fadeDim=false 时遮罩保持最深", veilSolid == 255, "遮罩 alpha=" + veilSolid);
+        TransitionConfig.setFadeDim(true);
+
+        // 字幕：默认完全不动（既不位移也不淡变）
+        Matrix3x2fStack.reset();
+        UiTransitions.beginBackgroundLayer(container, extractor);
+        float shiftBeforeSubtitle = Matrix3x2fStack.lastTranslateY;
+        UiTransitions.pauseForHud(extractor);
+        float subtitleCompensation = Matrix3x2fStack.lastTranslateY;
+        int subtitleAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.resumeAfterHud(extractor);
+        float restored = Matrix3x2fStack.lastTranslateY;
+        UiTransitions.endBackgroundLayer(container, extractor);
+        check("字幕默认被抵消位移（不跟着动）",
+                Math.abs(subtitleCompensation + shiftBeforeSubtitle) < 0.01F,
+                "层位移=" + shiftBeforeSubtitle + " 抵消=" + subtitleCompensation);
+        check("字幕默认不被淡出", subtitleAlpha == 255, "alpha=" + subtitleAlpha);
+        check("字幕之后位移被复原", Math.abs(restored - shiftBeforeSubtitle) < 0.01F, "复原=" + restored);
+
+        // ---------- 5) 打断动画接续 ----------
+        TransitionConfig.setDurationMs(2000);
+        openPanel(gui, container);
+        UiTransitions.beginContentLayer(container, extractor);   // 开始打开动画
+        Thread.sleep(700);                                      // 打开到约 1/3
+        UiTransitions.endContentLayer(container, extractor);
+        boolean intercepted = UiTransitions.interceptSetScreen(gui, null);   // 打断：改关闭
+        check("关闭被打断时被拦下", intercepted, "true");
+        // 测底板层：关闭时内容层会提前淡出（staggerClose），
+        // 用满整段、负责接续的是底板层，所以这里量底板。
+        TransitionConfig.setAnimatePanel(true);
+        UiTransitions.beginBackgroundLayer(container, extractor);
+        int handoffAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        float handoffShift = Matrix3x2fStack.lastTranslateY;
+        UiTransitions.endBackgroundLayer(container, extractor);
+        check("打断后底板从当前可见状态继续（不是瞬间跳回全不透明）",
+                handoffAlpha < 200 && handoffAlpha > 0, "接续 alpha=" + handoffAlpha);
+        check("打断后位移不为 0（继续往下走）", handoffShift > 0.5F, "接续位移=" + handoffShift);
+
+        // ---------- 6) 果冻回弹：0 = 关闭，>0 时打开过程中会冲过静止位置 ----------
+        TransitionConfig.setJelly(0.0F);
+        float noJelly = openShiftAtPeak(container, gui, extractor);
+        TransitionConfig.setJelly(0.8F);
+        float withJelly = openShiftAtPeak(container, gui, extractor);
+        check("果冻关闭时位移不会反向", noJelly >= 0.0F, "位移=" + noJelly);
+        check("果冻开启后出现回弹（位移一度变负）", withJelly < -0.5F, "最小位移=" + withJelly);
+        TransitionConfig.setJelly(0.0F);
+
+        // ---------- 7) 同类界面切换（创造模式分类标签）默认不做动画 ----------
+        TransitionConfig.setAnimateSameTypeSwitch(false);
+        Screen first = new EmptyContainer();
+        Screen second = new EmptyContainer();
+        openPanel(gui, first);
+        UiTransitions.interceptSetScreen(gui, second);
+        gui.setScreen(second);
+        Matrix3x2fStack.reset();
+        UiTransitions.beginContentLayer(second, extractor);
+        int skippedPush = Matrix3x2fStack.pushCount;
+        UiTransitions.endContentLayer(second, extractor);
+        check("同类界面切换默认直接切换（不压栈、不动画）", skippedPush == 0,
+                "pushCount=" + skippedPush);
+
+        TransitionConfig.setAnimateSameTypeSwitch(true);
+        Screen third = new EmptyContainer();
+        Screen fourth = new EmptyContainer();
+        openPanel(gui, third);
+        UiTransitions.interceptSetScreen(gui, fourth);
+        gui.setScreen(fourth);
+        Matrix3x2fStack.reset();
+        UiTransitions.beginContentLayer(fourth, extractor);
+        int animatedPush = Matrix3x2fStack.pushCount;
+        UiTransitions.endContentLayer(fourth, extractor);
+        check("打开开关后同类界面切换会做动画", animatedPush == 1, "pushCount=" + animatedPush);
+        TransitionConfig.setAnimateSameTypeSwitch(false);
+
+        // ---------- 8) 物品透明度兜底（收尾闪烁修复） ----------
+        // 先切到一个不同类的界面，避免触发"同类界面直接切换"而让下面这个界面不做动画
+        gui.setScreen(new Screen());
+        Screen tail = new EmptyContainer();
+        TransitionConfig.setDurationMs(2000);
+        openPanel(gui, tail);
+        UiTransitions.beginContentLayer(tail, extractor);   // 启动打开动画
+        UiTransitions.endContentLayer(tail, extractor);
+        Thread.sleep(400);
+        UiTransitions.beginContentLayer(tail, extractor);
+        int frameAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;   // 本帧层内透明度
+        Object untagged = new Object();                    // 从未登记过的渲染状态
+        UiTransitions.beginItemSubmit(untagged);
+        int fallbackAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endItemSubmit(untagged);
+        UiTransitions.endContentLayer(tail, extractor);
+        check("未登记物品沿用本帧透明度（不会瞬间弹回不透明）",
+                fallbackAlpha == frameAlpha && fallbackAlpha != 255,
+                "层内=" + frameAlpha + " 兜底=" + fallbackAlpha);
+
+        // 非动画帧必须回到完全不透明，否则物品会被残留值错误淡出。
+        // 用"同类界面切换被跳过"来构造一个确实不做动画的界面。
+        gui.setScreen(new EmptyContainer());
+        Screen idle = new EmptyContainer();
+        UiTransitions.interceptSetScreen(gui, idle);
+        gui.setScreen(idle);
+        Matrix3x2fStack.reset();
+        UiTransitions.beginContentLayer(idle, extractor);   // 该界面被标记为已就位，不应压栈
+        int idleFrame = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        Object idleState = new Object();
+        UiTransitions.beginItemSubmit(idleState);
+        int idleFallback = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endItemSubmit(idleState);
+        int idlePush = Matrix3x2fStack.pushCount;
+        UiTransitions.endContentLayer(idle, extractor);
+        check("非动画帧物品不会被残留透明度淡出（兜底=255）",
+                idleFallback == 255 && idleFrame == 255 && idlePush == 0,
+                "层内=" + idleFrame + " 兜底=" + idleFallback + " push=" + idlePush);
+
+        // ---------- 8b) 关闭时分两段消失：内容先没、底板最后 ----------
+        TransitionConfig.setStaggerClose(true);
+        TransitionConfig.setAnimatePanel(true);
+        TransitionConfig.setDurationMs(2000);
+        gui.setScreen(new Screen());
+        Screen closing = new EmptyContainer();
+        openPanel(gui, closing);
+        UiTransitions.beginContentLayer(closing, extractor);
+        UiTransitions.endContentLayer(closing, extractor);
+        UiTransitions.interceptSetScreen(gui, null);          // 触发关闭
+        Thread.sleep(1500);                                   // 约 75% 处
+        UiTransitions.beginBackgroundLayer(closing, extractor);
+        int panelAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endBackgroundLayer(closing, extractor);
+        UiTransitions.beginContentLayer(closing, extractor);
+        int contentAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endContentLayer(closing, extractor);
+        check("关闭中段：内容层已消失而底板仍在", contentAlpha == 0 && panelAlpha > 0,
+                "内容=" + contentAlpha + " 底板=" + panelAlpha);
+        TransitionConfig.setStaggerClose(false);
+        UiTransitions.beginBackgroundLayer(closing, extractor);
+        int panelAlpha2 = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endBackgroundLayer(closing, extractor);
+        UiTransitions.beginContentLayer(closing, extractor);
+        int contentAlpha2 = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endContentLayer(closing, extractor);
+        check("关掉 staggerClose 后两者同步淡出", contentAlpha2 == panelAlpha2,
+                "内容=" + contentAlpha2 + " 底板=" + panelAlpha2);
+        TransitionConfig.setStaggerClose(true);
+
+        // ---------- 9) 装了 JEI 类模组时：只淡变、不位移 ----------
+        UiTransitions.setOverlayModPresentForTest(Boolean.TRUE);
+        TransitionConfig.setOverlayModsFadeOnly(true);
+        gui.setScreen(new Screen());
+        Screen overlayHost = new EmptyContainer();
+        TransitionConfig.setDurationMs(2000);
+        openPanel(gui, overlayHost);
+        Matrix3x2fStack.reset();
+        UiTransitions.beginContentLayer(overlayHost, extractor);
+        float overlayShift = Matrix3x2fStack.lastTranslateY;
+        int overlayAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endContentLayer(overlayHost, extractor);
+        Thread.sleep(300);
+        UiTransitions.beginContentLayer(overlayHost, extractor);
+        float overlayShift2 = Matrix3x2fStack.lastTranslateY;
+        int overlayAlpha2 = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endContentLayer(overlayHost, extractor);
+        check("有 JEI 类模组时位移为 0（固定按钮留在原地）",
+                overlayShift == 0.0F && overlayShift2 == 0.0F,
+                "位移=" + overlayShift + "/" + overlayShift2);
+        check("有 JEI 类模组时仍然淡变", overlayAlpha < 255 || overlayAlpha2 < 255,
+                "alpha=" + overlayAlpha + "/" + overlayAlpha2);
+
+        TransitionConfig.setOverlayModsFadeOnly(false);
+        UiTransitions.setOverlayModPresentForTest(Boolean.TRUE);
+        gui.setScreen(new Screen());
+        Screen overlayHost2 = new EmptyContainer();
+        openPanel(gui, overlayHost2);
+        Thread.sleep(300);
+        UiTransitions.beginContentLayer(overlayHost2, extractor);
+        float overlayShift3 = Matrix3x2fStack.lastTranslateY;
+        UiTransitions.endContentLayer(overlayHost2, extractor);
+        check("关掉该选项后恢复位移", overlayShift3 > 0.5F, "位移=" + overlayShift3);
+        TransitionConfig.setOverlayModsFadeOnly(true);
+        UiTransitions.setOverlayModPresentForTest(null);
+
+        TransitionConfig.resetToDefaults();
+        System.out.println();
+        if (failures == 0) {
+            System.out.println("ALL CHECKS PASSED");
+        } else {
+            System.out.println("FAILED: " + failures + " 项未通过");
+            System.exit(3);
+        }
+    }
+
+    private static boolean excludedWorks(Screen screen) {
+        TransitionConfig.setExcludedScreens(screen.getClass().getName());
+        boolean animated = UiTransitions.shouldAnimate(screen);
+        TransitionConfig.setExcludedScreens("");
+        return !animated;
+    }
+
+    /** 让界面进入打开动画中段，返回该曲线下的位移，用于比较曲线差异 */
+    private static float curveValue(Screen screen, Gui gui, GuiGraphicsExtractor extractor,
+                                    String curveId) throws Exception {
+        TransitionConfig.setCurveId(curveId);
+        TransitionConfig.setDurationMs(2000);
+        Screen fresh = new EmptyContainer();
+        openPanel(gui, fresh);
+        UiTransitions.beginContentLayer(fresh, extractor);
+        Thread.sleep(800);
+        Matrix3x2fStack.reset();
+        UiTransitions.beginContentLayer(fresh, extractor);
+        float shift = Matrix3x2fStack.lastTranslateY;
+        UiTransitions.endContentLayer(fresh, extractor);
+        gui.setScreen(null);
+        Thread.sleep(100);
+        return shift;
+    }
+
+    /** 采样打开动画全程的最小位移：果冻开启时应当出现负值（冲过静止位置） */
+    private static float openShiftAtPeak(Screen unused, Gui gui, GuiGraphicsExtractor extractor)
+            throws Exception {
+        Screen fresh = new EmptyContainer();
+        TransitionConfig.setDurationMs(1200);
+        openPanel(gui, fresh);
+        float min = Float.MAX_VALUE;
+        long deadline = System.currentTimeMillis() + 1600L;
+        while (System.currentTimeMillis() < deadline) {
+            Matrix3x2fStack.reset();
+            UiTransitions.beginContentLayer(fresh, extractor);
+            min = Math.min(min, Matrix3x2fStack.lastTranslateY);
+            UiTransitions.endContentLayer(fresh, extractor);
+            Thread.sleep(40);
+        }
+        gui.setScreen(null);
+        Thread.sleep(80);
+        return min;
+    }
+
+    private static void openPanel(Gui gui, Screen screen) {
+        UiTransitions.interceptSetScreen(gui, screen);
+        gui.setScreen(screen);
+    }
+
+    private static void check(String label, boolean ok, String detail) {
+        if (!ok) {
+            failures++;
+        }
+        System.out.printf("%-6s %-40s %s%n", ok ? "[OK]" : "[FAIL]", label, detail);
+    }
+
+    static class EmptyContainer extends AbstractContainerScreen {
+    }
+}

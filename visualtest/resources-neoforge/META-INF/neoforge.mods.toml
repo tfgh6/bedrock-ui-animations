@@ -1,0 +1,33 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "ui_transitions_visualtest"
+version = "1.0.0"
+displayName = "Bedrock UI Animations Visual Test (dev only)"
+description = '''
+开发用测试驱动：自动进世界、开背包、连拍截图。仅用于本机验证，不随模组发布。
+'''
+authors = "KurumiのZaphkiel, JiaWang-sama"
+
+[[dependencies.ui_transitions_visualtest]]
+modId = "neoforge"
+type = "required"
+versionRange = "[1,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.ui_transitions_visualtest]]
+modId = "minecraft"
+type = "required"
+versionRange = "[26.3,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.ui_transitions_visualtest]]
+modId = "ui_transitions"
+type = "required"
+versionRange = "[1.0,)"
+ordering = "NONE"
+side = "CLIENT"

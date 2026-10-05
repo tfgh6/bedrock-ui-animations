@@ -1,0 +1,33 @@
+﻿# 构建产物
+build/
+out/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+.gradle/
+# 运行/测试产物
+run/
+uitransitions-captures/
+.mixin.out/
+# 原版 mod 的分析产物（属于他人作品，不随本项目发布）
+bedrock-ui-animations/
+bedrock-ui-animations-*.jar
+bedrock-ui-animations-分析报告.md
+修复说明.md
+patch_bedrockui.py
+# Python 缓存
+__pycache__/
+*.pyc
+# IDE / 系统
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+# 编译产物（源码仓库不需要 .class）
+*.class
+*-classes/
+verify/
+verify-uit/classes/
+verify-uit/stub-classes/
+# 对原版 mod 的修补产物（同样属于他人作品）
+patched/

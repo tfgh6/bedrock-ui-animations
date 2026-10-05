@@ -1,0 +1,53 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "MIT"
+iconFile = "assets/ui_transitions/icon.png"
+
+[[mods]]
+modId = "ui_transitions"
+version = "1.0.5"
+displayName = "Bedrock UI Animations"
+logoFile = "assets/ui_transitions/icon.png"
+description = '''
+为容器 / 菜单界面添加滑入滑出与淡入淡出过渡动画（基岩版风格）。纯客户端。
+同一 jar 同时支持 Fabric 与 NeoForge；NeoForge 侧只依赖下面声明的 Mixin 配置。
+'''
+authors = "KurumiのZaphkiel, JiaWang-sama"
+
+[[mixins]]
+config = "ui-transitions.mixins.json"
+
+[[dependencies.ui_transitions]]
+modId = "neoforge"
+type = "required"
+versionRange = "[1,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.ui_transitions]]
+modId = "minecraft"
+type = "required"
+versionRange = "[26.3,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.ui_transitions]]
+modId = "cloth-config"
+type = "optional"
+versionRange = "[1,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.ui_transitions]]
+modId = "sodium"
+type = "optional"
+versionRange = "[0.6,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.ui_transitions]]
+modId = "jei"
+type = "optional"
+versionRange = "[1,)"
+ordering = "NONE"
+side = "CLIENT"
