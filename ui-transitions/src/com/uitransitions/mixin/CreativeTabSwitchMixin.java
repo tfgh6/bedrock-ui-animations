@@ -34,9 +34,6 @@ public abstract class CreativeTabSwitchMixin {
     @Inject(method = EXTRACT, at = @At("HEAD"))
     private void uiTransitions$tabContentBegin(GuiGraphicsExtractor extractor, int mouseX, int mouseY,
                                                float partialTick, CallbackInfo ci) {
-        // 先看滚动位置是否变化（滚轮/拖滚动条/手指滑都覆盖，且点击不会误触发）
-        UiTransitions.onGridScrollIfChanged((Screen) (Object) this,
-                ((CreativeScrollAccessor) (Object) this).uiTransitionsScrollOffset());
         UiTransitions.beginTabContent((Screen) (Object) this, extractor);
     }
 

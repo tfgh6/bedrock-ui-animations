@@ -14,9 +14,7 @@
     "GuiRendererMixin",
     "PictureInPictureRendererMixin",
     "CreativeTabSwitchMixin",
-    "HotbarTabExcludeMixin",
-    "CreativeScrollAccessor",
-    "SlotScrollFadeMixin"
+    "HotbarTabExcludeMixin"
   ],
   "injectors": {
     "defaultRequire": 0

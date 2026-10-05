@@ -122,9 +122,6 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         layers.addOption(intOption(builder, "tab_switch_ms", "标签切换时长", "换页动画毫秒数，默认 300",
                 300, 50, 1000, 10, TransitionConfig.tabSwitchMs(),
                 TransitionConfig::setTabSwitchMs, value -> tr(value + " 毫秒")));
-        layers.addOption(intOption(builder, "tab_slide", "标签切换位移", "内容横向滑入距离（像素），0 = 只淡入淡出（默认）",
-                0, 0, 200, 4, TransitionConfig.tabSlide(),
-                TransitionConfig::setTabSlide, value -> tr(value + " 像素")));
         layers.addOption(intOption(builder, "scroll_fade_band", "滚动渐变带高度",
                 "滚动时多高范围内的格子参与渐变，越大越明显", 200, 16, 300, 2,
                 TransitionConfig.scrollFadeBand(), TransitionConfig::setScrollFadeBand,
@@ -187,7 +184,6 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "animate_tab_switch" -> TransitionConfig.animateTabSwitch();
             case "hide_player_model_on_close" -> TransitionConfig.hidePlayerModelOnClose();
             case "stagger_close" -> TransitionConfig.staggerClose();
-            case "tab_follow_click" -> TransitionConfig.tabFollowClick();
             case "overlay_mods_fade_only" -> TransitionConfig.overlayModsFadeOnly();
             case "animate_all_screens" -> TransitionConfig.animateAllScreens();
             case "fade" -> TransitionConfig.fade();
@@ -205,7 +201,6 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "jelly" -> Math.round(TransitionConfig.jelly() * 100.0F);
             case "curve" -> curveIndex(TransitionConfig.curve());
             case "tab_switch_ms" -> TransitionConfig.tabSwitchMs();
-            case "tab_slide" -> TransitionConfig.tabSlide();
             case "scroll_fade_band" -> TransitionConfig.scrollFadeBand();
             case "scroll_fade_min" -> TransitionConfig.scrollFadeMin();
             case "preview_fade_delay" -> TransitionConfig.previewFadeDelay();
