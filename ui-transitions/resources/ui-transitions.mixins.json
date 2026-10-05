@@ -12,7 +12,8 @@
     "GuiTextRenderStateMixin",
     "GuiItemRenderStateMixin",
     "GuiRendererMixin",
-    "PictureInPictureRendererMixin"
+    "PictureInPictureRendererMixin",
+    "CreativeTabSwitchMixin"
   ],
   "injectors": {
     "defaultRequire": 0

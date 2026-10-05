@@ -47,6 +47,7 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> STATIC_REGION = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> HUD_PAUSED = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> TAB_PUSHED = ThreadLocal.withInitial(() -> false);
     /**
      * 物品/画中画走的是预乘 alpha 管线（GUI_TEXTURED_PREMULTIPLIED_ALPHA）：
      * 颜色通道本应已经乘过 alpha。只改 alpha 而不动 RGB，元素就会比周围偏亮
@@ -55,6 +56,12 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> PREMULTIPLIED = ThreadLocal.withInitial(() -> false);
     /** 本帧的动画透明度：物品渲染状态没登记到（例如状态是在动画开始前建立的）就退回这个值 */
     private static final ThreadLocal<Float> FRAME_ALPHA = ThreadLocal.withInitial(() -> 1.0F);
+
+    /** 创造模式分类标签等"换页"动画：记录每屏的开始时间与方向 */
+    private static final Map<Screen, TabSwitch> TAB_SWITCH = new WeakHashMap<>();
+    /** 换页动画时长（毫秒）与横向位移（GUI 像素） */
+    private static final float TAB_SWITCH_MS = 220.0F;
+    private static final float TAB_SLIDE_PX = 56.0F;
 
     private static final Set<String> REPORTED = ConcurrentHashMap.newKeySet();
     private static final AtomicBoolean EFFECTIVE = new AtomicBoolean();
@@ -484,6 +491,75 @@ public final class UiTransitions {
      * 它们会被误当成动画的一部分跟着淡出，动画结束后又突然弹回来。
      * 界面自身的物品已在提取阶段登记在册，各自生效，不受这次复位影响。
      */
+    /** 分类标签被点选：记一次换页动画（方向由鼠标在标签栏的左右位置决定） */
+    public static void onTabSelected(Screen screen) {
+        try {
+            TransitionConfig.ensureLoaded();
+            if (screen == null || !TransitionConfig.animateTabSwitch()) {
+                return;
+            }
+            TAB_SWITCH.put(screen, new TabSwitch(System.nanoTime(), pointerOnLeftHalf() ? 1.0F : -1.0F));
+        } catch (Throwable t) {
+            report("onTabSelected", t);
+        }
+    }
+
+    /** 鼠标是否在屏幕左半边（用来决定内容从哪一侧滑入） */
+    private static boolean pointerOnLeftHalf() {
+        try {
+            Minecraft minecraft = Minecraft.getInstance();
+            Object handler = minecraft.mouseHandler;
+            Object x = handler.getClass().getMethod("xpos").invoke(handler);
+            double value = ((Number) x).doubleValue();
+            return value < minecraft.getWindow().getGuiScaledWidth() / 2.0;
+        } catch (Throwable t) {
+            return false;      // 取不到就当右侧滑入
+        }
+    }
+
+    /** 换页动画：只包内容层，底板与标签栏在背景层、天然不动 */
+    public static void beginTabContent(Screen screen, GuiGraphicsExtractor extractor) {
+        try {
+            if (screen == null) {
+                return;
+            }
+            TabSwitch state = TAB_SWITCH.get(screen);
+            if (state == null) {
+                return;
+            }
+            float progress = (System.nanoTime() - state.startNanos) / (TAB_SWITCH_MS * 1_000_000.0F);
+            if (progress >= 1.0F) {
+                TAB_SWITCH.remove(screen);
+                return;
+            }
+            float eased = TransitionConfig.curve().easeOut(Math.max(0.0F, progress));
+            float offset = state.direction * TAB_SLIDE_PX * (1.0F - eased);
+            float alpha = TransitionConfig.fade() ? eased : 1.0F;
+            WINDOW_ALPHA.set(alpha);
+            FRAME_ALPHA.set(alpha);
+            Matrix3x2fStack pose = extractor.pose();
+            pose.pushMatrix();
+            pose.translate(offset, 0.0F);
+            TAB_PUSHED.set(true);
+        } catch (Throwable t) {
+            report("beginTabContent", t);
+        }
+    }
+
+    public static void endTabContent(Screen screen, GuiGraphicsExtractor extractor) {
+        try {
+            if (TAB_PUSHED.get()) {
+                extractor.pose().popMatrix();
+                TAB_PUSHED.set(false);
+            }
+            WINDOW_ALPHA.set(1.0F);
+            FRAME_ALPHA.set(1.0F);
+        } catch (Throwable t) {
+            TAB_PUSHED.set(false);
+            report("endTabContent", t);
+        }
+    }
+
     public static void endScreenFrame() {
         try {
             FRAME_ALPHA.set(1.0F);
@@ -674,6 +750,10 @@ public final class UiTransitions {
 
     /** 关闭动画的状态 */
     private record Close(long startNanos, Screen target) {
+    }
+
+    /** 换页动画状态：起始时间 + 方向（+1 = 从左侧滑入，-1 = 从右侧滑入） */
+    private record TabSwitch(long startNanos, float direction) {
     }
 
     public static String status() {

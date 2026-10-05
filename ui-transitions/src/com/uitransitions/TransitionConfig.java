@@ -50,6 +50,7 @@ public final class TransitionConfig {
     private static volatile boolean overlayModsFadeOnly = true;
     private static volatile boolean allowLookDuringClose = true;
     private static volatile boolean staggerClose = true;
+    private static volatile boolean animateTabSwitch = true;
     private static volatile String excludedScreens = "";
     private static volatile Set<String> excludedSet = Collections.emptySet();
     private static volatile String extraScreens = DEFAULT_EXTRA_SCREENS;
@@ -192,6 +193,7 @@ public final class TransitionConfig {
         overlayModsFadeOnly = readBoolean(properties, "overlayModsFadeOnly", overlayModsFadeOnly);
         allowLookDuringClose = readBoolean(properties, "allowLookDuringClose", allowLookDuringClose);
         staggerClose = readBoolean(properties, "staggerClose", staggerClose);
+        animateTabSwitch = readBoolean(properties, "animateTabSwitch", animateTabSwitch);
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
         curveId = Curve.byId(properties.getProperty("curve", curveId)).id();
@@ -228,6 +230,7 @@ public final class TransitionConfig {
         properties.setProperty("overlayModsFadeOnly", Boolean.toString(overlayModsFadeOnly));
         properties.setProperty("allowLookDuringClose", Boolean.toString(allowLookDuringClose));
         properties.setProperty("staggerClose", Boolean.toString(staggerClose));
+        properties.setProperty("animateTabSwitch", Boolean.toString(animateTabSwitch));
         properties.setProperty("excludedScreens", excludedScreens == null ? "" : excludedScreens);
         properties.setProperty("extraScreens", extraScreens == null ? "" : extraScreens);
         try (FileOutputStream out = new FileOutputStream(file)) {
@@ -256,6 +259,7 @@ public final class TransitionConfig {
         overlayModsFadeOnly = true;
         allowLookDuringClose = true;
         staggerClose = true;
+        animateTabSwitch = true;
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;
         curveId = Curve.CUBIC.id();
@@ -350,6 +354,11 @@ public final class TransitionConfig {
      */
     public static boolean staggerClose() {
         return staggerClose;
+    }
+
+    /** 创造模式分类标签等"换页"是否做 iOS 式滑入动画 */
+    public static boolean animateTabSwitch() {
+        return animateTabSwitch;
     }
 
     public static String excludedScreens() {
@@ -507,6 +516,11 @@ public final class TransitionConfig {
 
     public static synchronized void setStaggerClose(boolean value) {
         staggerClose = value;
+        save();
+    }
+
+    public static synchronized void setAnimateTabSwitch(boolean value) {
+        animateTabSwitch = value;
         save();
     }
 
