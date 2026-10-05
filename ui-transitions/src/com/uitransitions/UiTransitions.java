@@ -535,15 +535,12 @@ public final class UiTransitions {
                 return;
             }
             float eased = TransitionConfig.curve().easeOut(Math.max(0.0F, progress));
-            float offset = state.direction * TransitionConfig.tabSlide() * (1.0F - eased);
+            // 标签切换只做淡入淡出，**不做任何位移**：
+            // 面板里的物品网格与那排快捷栏槽位是同一条绘制路径，一旦平移就会连快捷栏一起动。
             float alpha = TransitionConfig.fade() ? eased : 1.0F;
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
-            TAB_OFFSET.set(offset);
-            Matrix3x2fStack pose = extractor.pose();
-            pose.pushMatrix();
-            pose.translate(offset, 0.0F);
-            TAB_PUSHED.set(true);
+            TAB_OFFSET.set(0.0F);
         } catch (Throwable t) {
             report("beginTabContent", t);
         }
