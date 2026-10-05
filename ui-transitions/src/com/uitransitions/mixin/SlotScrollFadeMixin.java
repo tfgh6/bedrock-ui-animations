@@ -26,7 +26,9 @@ public abstract class SlotScrollFadeMixin {
     @Inject(method = EXTRACT_SLOT, at = @At("HEAD"))
     private void uiTransitionsSlotFadeBegin(GuiGraphicsExtractor extractor, Slot slot, int mouseX, int mouseY,
                                             CallbackInfo ci) {
-        UiTransitions.applySlotFade(extractor, slot == null ? 0 : slot.y, slot == null ? -1 : slot.index);
+        boolean inGrid = slot != null
+                && !(slot.container instanceof net.minecraft.world.entity.player.Inventory);
+        UiTransitions.applySlotFade(extractor, slot == null ? 0 : slot.y, inGrid);
     }
 
     @Inject(method = EXTRACT_SLOT, at = @At("RETURN"))

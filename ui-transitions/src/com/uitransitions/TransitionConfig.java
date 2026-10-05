@@ -54,8 +54,8 @@ public final class TransitionConfig {
     private static volatile int tabSwitchMs = 300;
     private static volatile int tabSlide = 0;
     private static volatile boolean tabFollowClick = true;
-    private static volatile int scrollFadeBand = 90;
-    private static volatile int scrollFadeMin = 10;
+    private static volatile int scrollFadeBand = 120;
+    private static volatile int scrollFadeMin = 5;
     private static volatile boolean hidePlayerModelOnClose = true;
     private static volatile String excludedScreens = "";
     private static volatile Set<String> excludedSet = Collections.emptySet();
@@ -281,8 +281,8 @@ public final class TransitionConfig {
         tabSwitchMs = 300;
         tabSlide = 0;
         tabFollowClick = true;
-        scrollFadeBand = 90;
-        scrollFadeMin = 10;
+        scrollFadeBand = 120;
+        scrollFadeMin = 5;
         hidePlayerModelOnClose = true;
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;

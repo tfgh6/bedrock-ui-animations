@@ -47,6 +47,8 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> STATIC_REGION = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> HUD_PAUSED = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
+    /** 当前这一帧的界面是否已收到关闭指令（收到就立即隐藏玩家模型） */
+    private static volatile boolean HIDE_PREVIEW = false;
     private static final ThreadLocal<Boolean> TAB_PUSHED = ThreadLocal.withInitial(() -> false);
     /** >0 表示逐格渐变正在进行（值为该次淡变的整体进度） */
     private static final ThreadLocal<Float> TAB_SLIDE_ACTIVE = ThreadLocal.withInitial(() -> 1.0F);
@@ -73,8 +75,11 @@ public final class UiTransitions {
     private static final int HOTBAR_LAST = 44;
     private static final ThreadLocal<Float> SLOT_SAVED_ALPHA = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> SLOT_SLIDE_PUSHED = ThreadLocal.withInitial(() -> false);
+    /** 本帧观察到的格子区上下界（上一帧的值用于计算，避免同帧内互相打架） */
+    private static final Map<Screen, float[]> GRID_BOUNDS = new WeakHashMap<>();
+    private static final ThreadLocal<float[]> GRID_BOUNDS_NOW = ThreadLocal.withInitial(() -> null);
     /** 逐格渐变时新格额外上滑的距离（像素） */
-    private static final float SLOT_SLIDE_PX = 14.0F;
+    private static final float SLOT_SLIDE_PX = 22.0F;
     /** 换页动画时长（毫秒）与横向位移（GUI 像素） */
 
 
@@ -241,6 +246,7 @@ public final class UiTransitions {
 
     /** 内容层开始：槽内物品、标题文字等。 */
     public static void beginContentLayer(Screen screen, GuiGraphicsExtractor extractor) {
+        HIDE_PREVIEW = isClosing(screen);
         try {
             FRAME_ALPHA.set(1.0F);      // 同上：非动画帧一律按不透明处理
             synchronized (ITEM_ALPHAS) {
@@ -640,22 +646,26 @@ public final class UiTransitions {
      * 逐格渐变：按槽位的纵坐标算透明度。
      * 新物品从下方进入时，越靠下越淡；从上往下滚时则以顶部为进入侧。
      */
-    public static void applySlotFade(GuiGraphicsExtractor extractor, int slotY, int slotIndex) {
+    public static void applySlotFade(GuiGraphicsExtractor extractor, int slotY, boolean inGrid) {
         try {
-            if (slotIndex >= HOTBAR_FIRST && slotIndex <= HOTBAR_LAST) {
-                return;      // 玩家快捷栏那一排：保持原版，不淡变
+            if (!inGrid) {
+                return;      // 玩家背包那几排不滚动：永远保持原版观感
             }
             float bandAlpha = activeSlotFadeAlpha();
             if (bandAlpha >= 0.999F) {
                 return;
             }
-            // 进入侧：向下滚动时物品向上走、新格从底部进来
-            float distance = scrollDirection > 0 ? slotY : (1000.0F - slotY);
+            // 进入侧：向下滚动时物品向上走，新格从**底部**进来（所以离底部越近越淡）
+            float[] bounds = GRID_BOUNDS.get(PUSHED_SCREEN.get());
+            float enterEdge = bounds == null ? slotY
+                    : (scrollDirection > 0 ? bounds[1] : bounds[0]);
+            float distance = Math.abs(slotY - enterEdge);
             float band = Math.max(1.0F, TransitionConfig.scrollFadeBand());
             float minAlpha = TransitionConfig.scrollFadeMin() / 100.0F;
             float ratio = Math.max(0.0F, Math.min(1.0F, distance / band));
             float alpha = minAlpha + (1.0F - minAlpha) * ratio;
             alpha = Math.max(alpha, bandAlpha);
+            noteGridSlot(slotY);
             SLOT_SAVED_ALPHA.set(WINDOW_ALPHA.get());
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
@@ -688,6 +698,18 @@ public final class UiTransitions {
         }
     }
 
+    /** 记录本帧格子区的上下界 */
+    private static void noteGridSlot(int slotY) {
+        float[] now = GRID_BOUNDS_NOW.get();
+        if (now == null) {
+            now = new float[] { slotY, slotY };
+            GRID_BOUNDS_NOW.set(now);
+        } else {
+            now[0] = Math.min(now[0], slotY);
+            now[1] = Math.max(now[1], slotY);
+        }
+    }
+
     /** 当前是否处于逐格渐变窗口；返回整体的淡变透明度（1 = 不介入） */
     private static float activeSlotFadeAlpha() {
         return TAB_SLIDE_ACTIVE.get();
@@ -700,6 +722,11 @@ public final class UiTransitions {
                 TAB_PUSHED.set(false);
             }
             TAB_SLIDE_ACTIVE.set(1.0F);
+            float[] now = GRID_BOUNDS_NOW.get();
+            if (now != null && screen != null) {
+                GRID_BOUNDS.put(screen, now);
+            }
+            GRID_BOUNDS_NOW.remove();
             WINDOW_ALPHA.set(1.0F);
             FRAME_ALPHA.set(1.0F);
         } catch (Throwable t) {
@@ -730,8 +757,7 @@ public final class UiTransitions {
             if (!TransitionConfig.fade()) {
                 return;
             }
-            if (TransitionConfig.hidePlayerModelOnClose() && isPlayerPreview(state)
-                    && PUSHED_SCREEN.get() != null && isClosing(PUSHED_SCREEN.get())) {
+            if (TransitionConfig.hidePlayerModelOnClose() && isPlayerPreview(state) && HIDE_PREVIEW) {
                 WINDOW_ALPHA.set(0.0F);      // 关闭动画一开始：玩家模型直接不画
                 PIP_BLITTING.set(true);
                 return;
