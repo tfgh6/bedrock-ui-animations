@@ -74,7 +74,7 @@ public final class UiTransitions {
     private static final int HOTBAR_FIRST = 36;
     private static final int HOTBAR_LAST = 44;
     private static final ThreadLocal<Float> SLOT_SAVED_ALPHA = new ThreadLocal<>();
-    private static final ThreadLocal<Boolean> SLOT_SLIDE_PUSHED = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Integer> SLOT_SLIDE_DEPTH = ThreadLocal.withInitial(() -> 0);
     /** 本帧观察到的格子区上下界（上一帧的值用于计算，避免同帧内互相打架） */
     private static final Map<Screen, float[]> GRID_BOUNDS = new WeakHashMap<>();
     private static final ThreadLocal<float[]> GRID_BOUNDS_NOW = ThreadLocal.withInitial(() -> null);
@@ -613,7 +613,7 @@ public final class UiTransitions {
     /** 快捷栏：在换页动画期间抵消横向位移（底部那排格子不该跟着滑） */
     public static void pauseForTabStatic(GuiGraphicsExtractor extractor) {
         try {
-            if (!TAB_PUSHED.get() || TAB_STATIC.get()) {
+            if (TAB_SLIDE_ACTIVE.get() >= 0.999F || TAB_STATIC.get()) {
                 return;
             }
             float offset = TAB_OFFSET.get();
@@ -671,7 +671,13 @@ public final class UiTransitions {
             SLOT_SAVED_ALPHA.set(WINDOW_ALPHA.get());
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
-            // 注：逐格上滑已撤掉 —— 矩阵压栈/弹栈不配平会让物品整片偏移，只保留逐格淡变
+            // iOS 列表手感：越靠进入侧的格子画得越低一点，随滚动滑到位
+            float slide = (1.0F - ratio) * SLOT_SLIDE_PX * (scrollDirection > 0 ? 1.0F : -1.0F);
+            if (Math.abs(slide) > 0.05F) {
+                extractor.pose().pushMatrix();
+                extractor.pose().translate(0.0F, slide);
+                SLOT_SLIDE_DEPTH.set(SLOT_SLIDE_DEPTH.get() + 1);
+            }
         } catch (Throwable t) {
             report("applySlotFade", t);
         }
@@ -679,9 +685,10 @@ public final class UiTransitions {
 
     public static void clearSlotFade(GuiGraphicsExtractor extractor) {
         try {
-            if (SLOT_SLIDE_PUSHED.get()) {
+            // 用深度计数弹出：推了几次就弹几次，结构上不可能累加偏移
+            while (SLOT_SLIDE_DEPTH.get() > 0) {
                 extractor.pose().popMatrix();
-                SLOT_SLIDE_PUSHED.set(false);
+                SLOT_SLIDE_DEPTH.set(SLOT_SLIDE_DEPTH.get() - 1);
             }
             Float saved = SLOT_SAVED_ALPHA.get();
             if (saved != null) {
