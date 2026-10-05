@@ -160,7 +160,7 @@ public final class UiTransitionsConfigScreen {
 
         layers.addEntry(entries.startIntSlider(Component.literal("标签切换位移（像素）"),
                         TransitionConfig.tabSlide(), 0, 200)
-                .setDefaultValue(120)
+                .setDefaultValue(0)
                 .setTooltip(Component.literal("内容横向滑入的距离，0 = 只淡入不滑动"))
                 .setSaveConsumer(TransitionConfig::setTabSlide)
                 .build());
