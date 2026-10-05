@@ -118,6 +118,14 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         layers.addOption(intOption(builder, "tab_slide", "标签切换位移", "内容横向滑入距离（像素），0 = 只淡入淡出（默认）",
                 0, 0, 200, 4, TransitionConfig.tabSlide(),
                 TransitionConfig::setTabSlide, value -> tr(value + " 像素")));
+        layers.addOption(intOption(builder, "scroll_fade_band", "滚动渐变带高度",
+                "滚动时多高范围内的格子参与渐变，越大越明显", 90, 16, 160, 2,
+                TransitionConfig.scrollFadeBand(), TransitionConfig::setScrollFadeBand,
+                value -> tr(value + " 像素")));
+        layers.addOption(intOption(builder, "scroll_fade_min", "滚动渐变最低透明度",
+                "边缘格子最淡到什么程度（%），越小越明显", 10, 0, 100, 5,
+                TransitionConfig.scrollFadeMin(), TransitionConfig::setScrollFadeMin,
+                value -> tr(value + "%")));
         layers.addOption(bool(builder, "tab_follow_click", "滑入方向跟随点击",
                 "关掉则固定从右侧滑入", true,
                 TransitionConfig.tabFollowClick(), TransitionConfig::setTabFollowClick));
@@ -186,6 +194,8 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "curve" -> curveIndex(TransitionConfig.curve());
             case "tab_switch_ms" -> TransitionConfig.tabSwitchMs();
             case "tab_slide" -> TransitionConfig.tabSlide();
+            case "scroll_fade_band" -> TransitionConfig.scrollFadeBand();
+            case "scroll_fade_min" -> TransitionConfig.scrollFadeMin();
             default -> 0;
         };
     }

@@ -68,9 +68,9 @@ public final class UiTransitions {
     /** 滚动方向：+1 = 内容向上走（新物品从下方进入），-1 = 反向 */
     private static volatile float scrollDirection = 1.0F;
     /** 逐格渐变带的高度（像素）：越靠近进入侧越淡 */
-    private static final float SLOT_FADE_BAND = 56.0F;
-    /** 逐格渐变的最低透明度 */
-    private static final float SLOT_FADE_MIN = 0.25F;
+    /** 快捷栏槽位在菜单里的索引（36-44）：这一排固定为原版观感，不参与任何淡变 */
+    private static final int HOTBAR_FIRST = 36;
+    private static final int HOTBAR_LAST = 44;
     private static final ThreadLocal<Float> SLOT_SAVED_ALPHA = new ThreadLocal<>();
     /** 换页动画时长（毫秒）与横向位移（GUI 像素） */
 
@@ -637,16 +637,21 @@ public final class UiTransitions {
      * 逐格渐变：按槽位的纵坐标算透明度。
      * 新物品从下方进入时，越靠下越淡；从上往下滚时则以顶部为进入侧。
      */
-    public static void applySlotFade(int slotY) {
+    public static void applySlotFade(int slotY, int slotIndex) {
         try {
+            if (slotIndex >= HOTBAR_FIRST && slotIndex <= HOTBAR_LAST) {
+                return;      // 玩家快捷栏那一排：保持原版，不淡变
+            }
             float bandAlpha = activeSlotFadeAlpha();
             if (bandAlpha >= 0.999F) {
                 return;
             }
             // 进入侧：向下滚动时物品向上走、新格从底部进来
             float distance = scrollDirection > 0 ? slotY : (1000.0F - slotY);
-            float ratio = Math.max(0.0F, Math.min(1.0F, distance / SLOT_FADE_BAND));
-            float alpha = SLOT_FADE_MIN + (1.0F - SLOT_FADE_MIN) * ratio;
+            float band = Math.max(1.0F, TransitionConfig.scrollFadeBand());
+            float minAlpha = TransitionConfig.scrollFadeMin() / 100.0F;
+            float ratio = Math.max(0.0F, Math.min(1.0F, distance / band));
+            float alpha = minAlpha + (1.0F - minAlpha) * ratio;
             alpha = Math.max(alpha, bandAlpha);
             SLOT_SAVED_ALPHA.set(WINDOW_ALPHA.get());
             WINDOW_ALPHA.set(alpha);

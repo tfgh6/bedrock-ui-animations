@@ -54,6 +54,8 @@ public final class TransitionConfig {
     private static volatile int tabSwitchMs = 300;
     private static volatile int tabSlide = 0;
     private static volatile boolean tabFollowClick = true;
+    private static volatile int scrollFadeBand = 90;
+    private static volatile int scrollFadeMin = 10;
     private static volatile String excludedScreens = "";
     private static volatile Set<String> excludedSet = Collections.emptySet();
     private static volatile String extraScreens = DEFAULT_EXTRA_SCREENS;
@@ -200,6 +202,8 @@ public final class TransitionConfig {
         tabSwitchMs = clampTabMs(readInt(properties, "tabSwitchMs", tabSwitchMs));
         tabSlide = clampTabSlide(readInt(properties, "tabSlide", tabSlide));
         tabFollowClick = readBoolean(properties, "tabFollowClick", tabFollowClick);
+        scrollFadeBand = clampBand(readInt(properties, "scrollFadeBand", scrollFadeBand));
+        scrollFadeMin = clampMin(readInt(properties, "scrollFadeMin", scrollFadeMin));
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
         curveId = Curve.byId(properties.getProperty("curve", curveId)).id();
@@ -240,6 +244,8 @@ public final class TransitionConfig {
         properties.setProperty("tabSwitchMs", Integer.toString(tabSwitchMs));
         properties.setProperty("tabSlide", Integer.toString(tabSlide));
         properties.setProperty("tabFollowClick", Boolean.toString(tabFollowClick));
+        properties.setProperty("scrollFadeBand", Integer.toString(scrollFadeBand));
+        properties.setProperty("scrollFadeMin", Integer.toString(scrollFadeMin));
         properties.setProperty("excludedScreens", excludedScreens == null ? "" : excludedScreens);
         properties.setProperty("extraScreens", extraScreens == null ? "" : extraScreens);
         try (FileOutputStream out = new FileOutputStream(file)) {
@@ -272,6 +278,8 @@ public final class TransitionConfig {
         tabSwitchMs = 300;
         tabSlide = 0;
         tabFollowClick = true;
+        scrollFadeBand = 90;
+        scrollFadeMin = 10;
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;
         curveId = Curve.CUBIC.id();
@@ -386,6 +394,16 @@ public final class TransitionConfig {
     /** 滑入方向是否跟随点击位置（关掉则固定从右侧滑入） */
     public static boolean tabFollowClick() {
         return tabFollowClick;
+    }
+
+    /** 滚动逐格渐变的渐变带高度（像素）：越大，越靠边的格子越淡 */
+    public static int scrollFadeBand() {
+        return scrollFadeBand;
+    }
+
+    /** 滚动逐格渐变的最低透明度（百分比）：越小越明显 */
+    public static int scrollFadeMin() {
+        return scrollFadeMin;
     }
 
     public static String excludedScreens() {
@@ -566,6 +584,16 @@ public final class TransitionConfig {
         save();
     }
 
+    public static synchronized void setScrollFadeBand(int value) {
+        scrollFadeBand = clampBand(value);
+        save();
+    }
+
+    public static synchronized void setScrollFadeMin(int value) {
+        scrollFadeMin = clampMin(value);
+        save();
+    }
+
     public static synchronized void setExcludedScreens(String value) {
         excludedScreens = value == null ? "" : value;
         rebuildSets();
@@ -589,6 +617,14 @@ public final class TransitionConfig {
             return DEFAULT_OFFSET;
         }
         return Math.max(MIN_OFFSET, Math.min(MAX_OFFSET, value));
+    }
+
+    private static int clampBand(int value) {
+        return Math.max(16, Math.min(160, value));
+    }
+
+    private static int clampMin(int value) {
+        return Math.max(0, Math.min(100, value));
     }
 
     private static int clampTabMs(int value) {
