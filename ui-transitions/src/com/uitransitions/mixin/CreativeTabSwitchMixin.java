@@ -31,6 +31,18 @@ public abstract class CreativeTabSwitchMixin {
         UiTransitions.onTabSelected((Screen) (Object) this);
     }
 
+    /**
+     * 滚动物品列表时也给一次淡入：上下滚动后新出现的物品从半透明淡入，而不是瞬间替换。
+     * 复用换页那套淡变（同一份时长/开关配置），这样物品区的表现是一致的。
+     */
+    @Inject(method = "mouseScrolled(DDDD)Z", at = @At("HEAD"))
+    private void uiTransitionsGridScroll(double mouseX, double mouseY, double scrollX, double scrollY,
+                                         org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
+        if (scrollY != 0.0) {
+            UiTransitions.onTabSelected((Screen) (Object) this);
+        }
+    }
+
     @Inject(method = EXTRACT, at = @At("HEAD"))
     private void uiTransitions$tabContentBegin(GuiGraphicsExtractor extractor, int mouseX, int mouseY,
                                                float partialTick, CallbackInfo ci) {
