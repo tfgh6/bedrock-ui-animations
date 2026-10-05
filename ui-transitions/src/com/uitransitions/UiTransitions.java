@@ -48,6 +48,8 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> HUD_PAUSED = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> TAB_PUSHED = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> TAB_STATIC = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Float> TAB_OFFSET = ThreadLocal.withInitial(() -> 0.0F);
     /**
      * 物品/画中画走的是预乘 alpha 管线（GUI_TEXTURED_PREMULTIPLIED_ALPHA）：
      * 颜色通道本应已经乘过 alpha。只改 alpha 而不动 RGB，元素就会比周围偏亮
@@ -537,12 +539,47 @@ public final class UiTransitions {
             float alpha = TransitionConfig.fade() ? eased : 1.0F;
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
+            TAB_OFFSET.set(offset);
             Matrix3x2fStack pose = extractor.pose();
             pose.pushMatrix();
             pose.translate(offset, 0.0F);
             TAB_PUSHED.set(true);
         } catch (Throwable t) {
             report("beginTabContent", t);
+        }
+    }
+
+    /** 快捷栏：在换页动画期间抵消横向位移（底部那排格子不该跟着滑） */
+    public static void pauseForTabStatic(GuiGraphicsExtractor extractor) {
+        try {
+            if (!TAB_PUSHED.get() || TAB_STATIC.get()) {
+                return;
+            }
+            float offset = TAB_OFFSET.get();
+            if (offset != 0.0F) {
+                extractor.pose().translate(-offset, 0.0F);
+            }
+            WINDOW_ALPHA.set(1.0F);
+            FRAME_ALPHA.set(1.0F);
+            TAB_STATIC.set(true);
+        } catch (Throwable t) {
+            report("pauseForTabStatic", t);
+        }
+    }
+
+    public static void resumeAfterTabStatic(GuiGraphicsExtractor extractor) {
+        try {
+            if (!TAB_STATIC.get()) {
+                return;
+            }
+            TAB_STATIC.set(false);
+            float offset = TAB_OFFSET.get();
+            if (offset != 0.0F) {
+                extractor.pose().translate(offset, 0.0F);
+            }
+        } catch (Throwable t) {
+            TAB_STATIC.set(false);
+            report("resumeAfterTabStatic", t);
         }
     }
 

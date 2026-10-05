@@ -51,8 +51,8 @@ public final class TransitionConfig {
     private static volatile boolean allowLookDuringClose = true;
     private static volatile boolean staggerClose = true;
     private static volatile boolean animateTabSwitch = true;
-    private static volatile int tabSwitchMs = 220;
-    private static volatile int tabSlide = 56;
+    private static volatile int tabSwitchMs = 300;
+    private static volatile int tabSlide = 120;
     private static volatile boolean tabFollowClick = true;
     private static volatile String excludedScreens = "";
     private static volatile Set<String> excludedSet = Collections.emptySet();
@@ -269,8 +269,8 @@ public final class TransitionConfig {
         allowLookDuringClose = true;
         staggerClose = true;
         animateTabSwitch = true;
-        tabSwitchMs = 220;
-        tabSlide = 56;
+        tabSwitchMs = 300;
+        tabSlide = 120;
         tabFollowClick = true;
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;
