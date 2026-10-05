@@ -60,8 +60,7 @@ public final class UiTransitions {
     /** 创造模式分类标签等"换页"动画：记录每屏的开始时间与方向 */
     private static final Map<Screen, TabSwitch> TAB_SWITCH = new WeakHashMap<>();
     /** 换页动画时长（毫秒）与横向位移（GUI 像素） */
-    private static final float TAB_SWITCH_MS = 220.0F;
-    private static final float TAB_SLIDE_PX = 56.0F;
+
 
     private static final Set<String> REPORTED = ConcurrentHashMap.newKeySet();
     private static final AtomicBoolean EFFECTIVE = new AtomicBoolean();
@@ -498,7 +497,8 @@ public final class UiTransitions {
             if (screen == null || !TransitionConfig.animateTabSwitch()) {
                 return;
             }
-            TAB_SWITCH.put(screen, new TabSwitch(System.nanoTime(), pointerOnLeftHalf() ? 1.0F : -1.0F));
+            boolean fromLeft = TransitionConfig.tabFollowClick() && pointerOnLeftHalf();
+            TAB_SWITCH.put(screen, new TabSwitch(System.nanoTime(), fromLeft ? 1.0F : -1.0F));
         } catch (Throwable t) {
             report("onTabSelected", t);
         }
@@ -527,13 +527,13 @@ public final class UiTransitions {
             if (state == null) {
                 return;
             }
-            float progress = (System.nanoTime() - state.startNanos) / (TAB_SWITCH_MS * 1_000_000.0F);
+            float progress = (System.nanoTime() - state.startNanos) / (TransitionConfig.tabSwitchMs() * 1_000_000.0F);
             if (progress >= 1.0F) {
                 TAB_SWITCH.remove(screen);
                 return;
             }
             float eased = TransitionConfig.curve().easeOut(Math.max(0.0F, progress));
-            float offset = state.direction * TAB_SLIDE_PX * (1.0F - eased);
+            float offset = state.direction * TransitionConfig.tabSlide() * (1.0F - eased);
             float alpha = TransitionConfig.fade() ? eased : 1.0F;
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);

@@ -144,6 +144,35 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("分类标签切换动画（创造模式）"), TransitionConfig.animateTabSwitch())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("点创造模式物品栏的分类标签时，物品区从点击方向滑入并淡入。"),
+                        Component.literal("底板、标签栏、玩家小模型保持不动"))
+                .setSaveConsumer(TransitionConfig::setAnimateTabSwitch)
+                .build());
+
+        layers.addEntry(entries.startIntSlider(Component.literal("标签切换时长（毫秒）"),
+                        TransitionConfig.tabSwitchMs(), 50, 1000)
+                .setDefaultValue(220)
+                .setTooltip(Component.literal("换页动画持续多久，默认 220（比开关界面的 300 更利落）"))
+                .setSaveConsumer(TransitionConfig::setTabSwitchMs)
+                .build());
+
+        layers.addEntry(entries.startIntSlider(Component.literal("标签切换位移（像素）"),
+                        TransitionConfig.tabSlide(), 0, 200)
+                .setDefaultValue(56)
+                .setTooltip(Component.literal("内容横向滑入的距离，0 = 只淡入不滑动"))
+                .setSaveConsumer(TransitionConfig::setTabSlide)
+                .build());
+
+        layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("滑入方向跟随点击"), TransitionConfig.tabFollowClick())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("开：点靠左的标签从左滑入；关：固定从右侧滑入"))
+                .setSaveConsumer(TransitionConfig::setTabFollowClick)
+                .build());
+
+        layers.addEntry(entries.startBooleanToggle(
                         Component.literal("同类界面切换也做动画"), TransitionConfig.animateSameTypeSwitch())
                 .setDefaultValue(false)
                 .setTooltip(Component.literal("创造模式物品栏切换分类标签、配方书翻页这类同界面换页，默认直接切换、不做动画。"),

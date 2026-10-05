@@ -51,6 +51,9 @@ public final class TransitionConfig {
     private static volatile boolean allowLookDuringClose = true;
     private static volatile boolean staggerClose = true;
     private static volatile boolean animateTabSwitch = true;
+    private static volatile int tabSwitchMs = 220;
+    private static volatile int tabSlide = 56;
+    private static volatile boolean tabFollowClick = true;
     private static volatile String excludedScreens = "";
     private static volatile Set<String> excludedSet = Collections.emptySet();
     private static volatile String extraScreens = DEFAULT_EXTRA_SCREENS;
@@ -194,6 +197,9 @@ public final class TransitionConfig {
         allowLookDuringClose = readBoolean(properties, "allowLookDuringClose", allowLookDuringClose);
         staggerClose = readBoolean(properties, "staggerClose", staggerClose);
         animateTabSwitch = readBoolean(properties, "animateTabSwitch", animateTabSwitch);
+        tabSwitchMs = clampTabMs(readInt(properties, "tabSwitchMs", tabSwitchMs));
+        tabSlide = clampTabSlide(readInt(properties, "tabSlide", tabSlide));
+        tabFollowClick = readBoolean(properties, "tabFollowClick", tabFollowClick);
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
         curveId = Curve.byId(properties.getProperty("curve", curveId)).id();
@@ -231,6 +237,9 @@ public final class TransitionConfig {
         properties.setProperty("allowLookDuringClose", Boolean.toString(allowLookDuringClose));
         properties.setProperty("staggerClose", Boolean.toString(staggerClose));
         properties.setProperty("animateTabSwitch", Boolean.toString(animateTabSwitch));
+        properties.setProperty("tabSwitchMs", Integer.toString(tabSwitchMs));
+        properties.setProperty("tabSlide", Integer.toString(tabSlide));
+        properties.setProperty("tabFollowClick", Boolean.toString(tabFollowClick));
         properties.setProperty("excludedScreens", excludedScreens == null ? "" : excludedScreens);
         properties.setProperty("extraScreens", extraScreens == null ? "" : extraScreens);
         try (FileOutputStream out = new FileOutputStream(file)) {
@@ -260,6 +269,9 @@ public final class TransitionConfig {
         allowLookDuringClose = true;
         staggerClose = true;
         animateTabSwitch = true;
+        tabSwitchMs = 220;
+        tabSlide = 56;
+        tabFollowClick = true;
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;
         curveId = Curve.CUBIC.id();
@@ -359,6 +371,21 @@ public final class TransitionConfig {
     /** 创造模式分类标签等"换页"是否做 iOS 式滑入动画 */
     public static boolean animateTabSwitch() {
         return animateTabSwitch;
+    }
+
+    /** 换页动画时长（毫秒） */
+    public static int tabSwitchMs() {
+        return tabSwitchMs;
+    }
+
+    /** 换页时内容横向滑入的距离（像素） */
+    public static int tabSlide() {
+        return tabSlide;
+    }
+
+    /** 滑入方向是否跟随点击位置（关掉则固定从右侧滑入） */
+    public static boolean tabFollowClick() {
+        return tabFollowClick;
     }
 
     public static String excludedScreens() {
@@ -524,6 +551,21 @@ public final class TransitionConfig {
         save();
     }
 
+    public static synchronized void setTabSwitchMs(int value) {
+        tabSwitchMs = clampTabMs(value);
+        save();
+    }
+
+    public static synchronized void setTabSlide(int value) {
+        tabSlide = clampTabSlide(value);
+        save();
+    }
+
+    public static synchronized void setTabFollowClick(boolean value) {
+        tabFollowClick = value;
+        save();
+    }
+
     public static synchronized void setExcludedScreens(String value) {
         excludedScreens = value == null ? "" : value;
         rebuildSets();
@@ -547,6 +589,14 @@ public final class TransitionConfig {
             return DEFAULT_OFFSET;
         }
         return Math.max(MIN_OFFSET, Math.min(MAX_OFFSET, value));
+    }
+
+    private static int clampTabMs(int value) {
+        return Math.max(50, Math.min(1000, value));
+    }
+
+    private static int clampTabSlide(int value) {
+        return Math.max(0, Math.min(200, value));
     }
 
     private static float clampJelly(float value) {
