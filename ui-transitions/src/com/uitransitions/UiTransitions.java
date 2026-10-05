@@ -478,6 +478,21 @@ public final class UiTransitions {
         overlayModPresent = value;
     }
 
+    /**
+     * 界面这一帧的绘制结束：把动画透明度复位。
+     * 快捷栏等 HUD 元素是在界面之后、同一帧内绘制的，如果不复位，
+     * 它们会被误当成动画的一部分跟着淡出，动画结束后又突然弹回来。
+     * 界面自身的物品已在提取阶段登记在册，各自生效，不受这次复位影响。
+     */
+    public static void endScreenFrame() {
+        try {
+            FRAME_ALPHA.set(1.0F);
+            WINDOW_ALPHA.set(1.0F);
+        } catch (Throwable t) {
+            report("endScreenFrame", t);
+        }
+    }
+
     public static boolean isClosing(Screen screen) {
         return CLOSING.containsKey(screen);
     }

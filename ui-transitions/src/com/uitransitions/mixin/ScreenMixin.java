@@ -67,6 +67,13 @@ public abstract class ScreenMixin {
         UiTransitions.endContentLayer((Screen) (Object) this, extractor);
     }
 
+    /** 界面绘制结束：复位动画透明度，避免泄漏到 HUD（快捷栏物品消失又出现） */
+    @Inject(method = EXTRACT_ALL, at = @At("RETURN"))
+    private void uiTransitionsScreenFrameEnd(GuiGraphicsExtractor extractor, int mouseX, int mouseY,
+                                             float partialTick, CallbackInfo ci) {
+        UiTransitions.endScreenFrame();
+    }
+
     // ------------------------------------------------------------------ 留在原地的背景（方法级抵消）
 
     @Inject(method = "extractTransparentBackground(Lnet/minecraft/client/gui/GuiGraphicsExtractor;)V",
