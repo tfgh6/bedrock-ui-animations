@@ -49,6 +49,8 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
     /** 当前这一帧的界面是否已收到关闭指令（收到就立即隐藏玩家模型） */
     private static volatile boolean HIDE_PREVIEW = false;
+    /** 打开界面时，玩家模型的透明度覆盖值；负数表示不干预 */
+    private static volatile float PREVIEW_ALPHA_OVERRIDE = -1.0F;
     private static final ThreadLocal<Boolean> TAB_PUSHED = ThreadLocal.withInitial(() -> false);
     /** >0 表示逐格渐变正在进行（值为该次淡变的整体进度） */
     private static final ThreadLocal<Float> TAB_SLIDE_ACTIVE = ThreadLocal.withInitial(() -> 1.0F);
@@ -247,8 +249,23 @@ public final class UiTransitions {
     /** 内容层开始：槽内物品、标题文字等。 */
     public static void beginContentLayer(Screen screen, GuiGraphicsExtractor extractor) {
         // 只针对背包/容器界面里的玩家模型；书、地图等其它画中画预览照旧渐隐
-        HIDE_PREVIEW = isClosing(screen)
-                && screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+        boolean container = screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+        HIDE_PREVIEW = isClosing(screen) && container;
+        PREVIEW_ALPHA_OVERRIDE = -1.0F;
+        if (container && !HIDE_PREVIEW) {
+            try {
+                Long started = OPEN_START.get(screen);
+                if (started != null) {
+                    float ms = Math.max(1.0F, TransitionConfig.durationMs());
+                    float progress = (System.nanoTime() - started) / (ms * 1_000_000.0F);
+                    // 先等一小会儿（约 35% 时长）再淡入，避免和界面一起冒出来显得突兀
+                    float delayed = (progress - 0.35F) / 0.65F;
+                    PREVIEW_ALPHA_OVERRIDE = Math.max(0.0F, Math.min(1.0F, delayed));
+                }
+            } catch (Throwable ignored) {
+                PREVIEW_ALPHA_OVERRIDE = -1.0F;
+            }
+        }
         try {
             FRAME_ALPHA.set(1.0F);      // 同上：非动画帧一律按不透明处理
             synchronized (ITEM_ALPHAS) {
@@ -758,6 +775,11 @@ public final class UiTransitions {
     public static void beginPipBlit(Object state) {
         try {
             if (!TransitionConfig.fade()) {
+                return;
+            }
+            if (isPlayerPreview(state) && !HIDE_PREVIEW && PREVIEW_ALPHA_OVERRIDE >= 0.0F) {
+                WINDOW_ALPHA.set(PREVIEW_ALPHA_OVERRIDE);
+                PIP_BLITTING.set(true);
                 return;
             }
             if (TransitionConfig.hidePlayerModelOnClose() && isPlayerPreview(state) && HIDE_PREVIEW) {
