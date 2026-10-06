@@ -75,7 +75,7 @@ public abstract class ScreenMixin {
     private void uiTransitionsScreenFrameEnd(GuiGraphicsExtractor extractor, int mouseX, int mouseY,
                                              float partialTick, CallbackInfo ci) {
         UiTransitions.endScreenFrame();
-        // 有界面时在界面之上画跨维度遮罩（没有界面时由 GuiVeilMixin 兜底）
+        // 有界面时在界面之上画跨维度遮罩（没有界面时由 HudVeilMixin 兜底）
         UiTransitions.drawPortalVeil(extractor);
     }
 

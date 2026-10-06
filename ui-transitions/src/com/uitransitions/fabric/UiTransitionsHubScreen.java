@@ -40,7 +40,7 @@ public final class UiTransitionsHubScreen extends Screen {
     @Override
     protected void init() {
         int centerX = this.width / 2;
-        int total = BUTTON_HEIGHT * 3 + GAP * 2;
+        int total = BUTTON_HEIGHT * 4 + GAP * 3;
         int y = Math.max(40, this.height / 2 - total / 2);
 
         addRenderableWidget(Button.builder(
@@ -62,6 +62,15 @@ public final class UiTransitionsHubScreen extends Screen {
                         Component.translatable("ui_transitions.hub.curve_close"),
                         b -> this.minecraft.setScreenAndShow(
                                 new UiTransitionsCurveScreen(this, UiTransitionsCurveScreen.Target.CLOSE)))
+                .bounds(centerX - BUTTON_WIDTH / 2, y, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build());
+
+        // 「排除的界面」做成独立界面而不是 Cloth 里的字符串列表：
+        // 类名又长又难拼，而这个模组自己知道运行期见过哪些界面，摆出来点一下就成了。
+        y += BUTTON_HEIGHT + GAP;
+        addRenderableWidget(Button.builder(
+                        Component.translatable("ui_transitions.hub.exclude"),
+                        b -> this.minecraft.setScreenAndShow(new UiTransitionsExclusionsScreen(this)))
                 .bounds(centerX - BUTTON_WIDTH / 2, y, BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build());
     }

@@ -12,6 +12,7 @@
 --------
     python visualtest/visual_test.py                     # 全流程（较慢，会建世界）
     python visualtest/visual_test.py --phases curve      # 只验曲线编辑器（不用建世界，快）
+    python visualtest/visual_test.py --phases curveui    # 只验曲线编辑器的交互（点列表 / 加点 / 删点）
     python visualtest/visual_test.py --phases curve,config
     python visualtest/visual_test.py --phases inventory,enchant
     python visualtest/visual_test.py --list              # 看有哪些阶段
@@ -23,6 +24,7 @@
     panels     合成面板的开/关动画（默认基线，含字幕探针）
     config     Cloth 图形化配置界面
     curve      曲线编辑器（渐入 / 渐出两页）
+    curveui    曲线编辑器的交互：点动画列表、切多点模式、加点/删点、核对布局宽度
     world      只进世界并抓一张
     inventory  生存背包：玩家小模型（画中画）是否跟着界面动
     enchant    附魔台：附魔书（画中画）是否跟着界面动、有没有被裁
@@ -65,6 +67,7 @@ PHASES = {
     "config": "Cloth 图形化配置界面",
     "configclick": "配置界面里「打开曲线编辑器」入口能不能点开",
     "curve": "曲线编辑器（渐入 / 渐出）",
+    "curveui": "曲线编辑器的交互：动画列表 / 多点加点删点 / 布局宽度核对",
     "world": "只进世界并抓一张",
     "inventory": "生存背包：玩家小模型（画中画）",
     "enchant": "附魔台：附魔书（画中画）",

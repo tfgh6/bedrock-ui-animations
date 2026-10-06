@@ -591,6 +591,237 @@ public class VerifyAdvanced {
                 TransitionConfig.MIN_PORTAL_DURATION_MS == 0 && TransitionConfig.MAX_PORTAL_DURATION_MS <= 3000,
                 "范围=" + TransitionConfig.MIN_PORTAL_DURATION_MS + ".." + TransitionConfig.MAX_PORTAL_DURATION_MS);
 
+        // ---------- 14) 多点曲线：曲线编辑器里"点一下加点 / 拖点 / 双击删点"的模型 ----------
+        //
+        // 这一段是**唯一**能覆盖曲线编辑器交互的地方。界面类依赖 Minecraft 的 GUI 类型，
+        // run_verify.py 只编译 UiTransitions + TransitionConfig 两个核心类，跑不到它 ——
+        // 所以加/删/拖三件事刻意做成了 TransitionConfig.Curve 上的纯静态方法，
+        // 界面只负责坐标换算与命中判定。这里验的就是那三个方法，
+        // 以及"存进配置再读回来还是同一条曲线"这条容易断的链路。
+
+        float[] two = TransitionConfig.Curve.normalizeMulti(new float[] { 0.5F, 0.8F });
+        check("多点曲线首尾由 normalizeMulti 强制补齐",
+                two.length == 6 && two[0] == 0.0F && two[1] == 0.0F
+                        && two[4] == 1.0F && two[5] == 1.0F,
+                "点数=" + (two.length / 2) + " 首=" + two[0] + "," + two[1]
+                        + " 尾=" + two[4] + "," + two[5]);
+
+        // 加点：点在图上的 (0.3, 0.9) 处，曲线里应当多出一个点
+        float[] added = TransitionConfig.Curve.insertMulti(two, 0.3F, 0.9F);
+        check("在图上的空白处点一下会加一个点", added.length == two.length + 2,
+                "点数 " + (two.length / 2) + " -> " + (added.length / 2));
+        check("新点落在点击的位置上",
+                Math.abs(TransitionConfig.Curve.pointX(added, 0) - 0.3F) < 1.0e-4F
+                        && Math.abs(TransitionConfig.Curve.pointY(added, 0) - 0.9F) < 1.0e-4F,
+                "x=" + TransitionConfig.Curve.pointX(added, 0)
+                        + " y=" + TransitionConfig.Curve.pointY(added, 0));
+        check("加进去的点按 x 排在正确的位置（顺序不会乱）",
+                TransitionConfig.Curve.pointX(added, 0) < TransitionConfig.Curve.pointX(added, 1),
+                "x0=" + TransitionConfig.Curve.pointX(added, 0)
+                        + " x1=" + TransitionConfig.Curve.pointX(added, 1));
+
+        // 靠得太近的点加不进去：加不进去时要**原样返回同一个数组引用**，
+        // 界面靠 `after != before` 判断"这次点击什么也没做"
+        float[] tooClose = TransitionConfig.Curve.insertMulti(added, 0.3F + 0.005F, 0.2F);
+        check("和已有点挨太近时不会加点（返回原数组）", tooClose == added,
+                "引用相同=" + (tooClose == added));
+
+        // 越界的点击被夹进合法范围，而不是造出 x<0 或 x>1 的点。
+        // 两件事一起验：①夹到的最左边**确实能加进点**（边界留了足够余量，
+        // 早先只留一个 gap，夹完正好贴着端点，于是边缘的点击永远加不进去）；
+        // ②夹出来的 x 落在合法范围内，而不是负数。
+        float[] clamped = TransitionConfig.Curve.insertMulti(two, -0.5F, 0.5F);
+        check("点在图外面时新点的 x 被夹进合法范围（而且真的加得进去）",
+                clamped.length == 8
+                        && TransitionConfig.Curve.pointX(clamped, 0) >= TransitionConfig.Curve.MIN_POINT_X - 1.0e-6F,
+                "长度=" + clamped.length
+                        + " 首点x=" + (clamped.length >= 6 ? TransitionConfig.Curve.pointX(clamped, 0) : "没加点"));
+
+        // 拖点：x 会被夹在左右邻居之间，不许越到邻居另一侧
+        // （越过去的话排序之后点的身份就变了，表现为"手指下的点突然换成另一个"）
+        float[] moved = TransitionConfig.Curve.moveMulti(added, 0, 0.99F, 0.4F);
+        check("拖点时 x 被夹在左边界与右邻居之间",
+                TransitionConfig.Curve.pointX(moved, 0) < TransitionConfig.Curve.pointX(moved, 1)
+                        && Math.abs(TransitionConfig.Curve.pointY(moved, 0) - 0.4F) < 1.0e-4F,
+                "x=" + TransitionConfig.Curve.pointX(moved, 0)
+                        + " (右邻居 " + TransitionConfig.Curve.pointX(moved, 1) + ")");
+        check("拖点不会改变点的个数", moved.length == added.length,
+                "点数=" + (moved.length / 2));
+        float[] draggedOut = TransitionConfig.Curve.moveMulti(added, 0, 0.3F, 99.0F);
+        check("拖点时 y 会被夹在可视范围内（不会拖到画布外）",
+                TransitionConfig.Curve.pointY(draggedOut, 0) <= 1.5F,
+                "y=" + TransitionConfig.Curve.pointY(draggedOut, 0));
+
+        // 删点：首尾不许删，越界不许删 —— 这两种情况都必须原样返回
+        check("首尾两个点删不掉（返回原数组）", TransitionConfig.Curve.removeMulti(added, -1) == added,
+                "index=-1 引用相同");
+        check("越界的下标删不掉（返回原数组）", TransitionConfig.Curve.removeMulti(added, 99) == added,
+                "index=99 引用相同");
+        float[] removed = TransitionConfig.Curve.removeMulti(added, 0);
+        check("删掉一个内部点后点数减一", removed.length == added.length - 2,
+                "点数 " + (added.length / 2) + " -> " + (removed.length / 2));
+        check("删完首尾仍然固定为 (0,0) 与 (1,1)",
+                removed[0] == 0.0F && removed[1] == 0.0F
+                        && removed[removed.length - 2] == 1.0F && removed[removed.length - 1] == 1.0F,
+                "首=" + removed[0] + "," + removed[1]
+                        + " 尾=" + removed[removed.length - 2] + "," + removed[removed.length - 1]);
+
+        // 存盘格式：curveCustom 字段被贝塞尔与多点**共用**，靠 curve id 决定怎么解析
+        String multiText = TransitionConfig.Curve.formatMulti(added);
+        check("多点曲线的存储格式是 x,y;x,y;… 且带首尾",
+                multiText.startsWith("0,0;") && multiText.endsWith(";1,1"),
+                "内容=" + multiText);
+        check("存成字符串再读回来是同一条点集",
+                Math.abs(TransitionConfig.Curve.multi(
+                        TransitionConfig.Curve.parseMulti(multiText)).easeIn(0.5F)
+                        - TransitionConfig.Curve.multi(added).easeIn(0.5F)) < 1.0e-5F,
+                "easeIn(0.5)=" + TransitionConfig.Curve.multi(added).easeIn(0.5F));
+
+        // 多点插值：相邻点之间是 smoothstep，必须单调、不过冲。
+        // 注意取样数据本身要单调 —— 拿一个"先上后下"的点集去断言单调，
+        // 失败的是测试数据而不是被测代码（这里第一版就写错了）。
+        float[] rising = TransitionConfig.Curve.normalizeMulti(
+                new float[] { 0.3F, 0.25F, 0.7F, 0.75F });
+        boolean monotonic = true;
+        float previous = -1.0F;
+        for (int i = 0; i <= 100; i++) {
+            float value = TransitionConfig.Curve.multi(rising).easeIn(i / 100.0F);
+            if (value < previous - 1.0e-5F) {
+                monotonic = false;
+            }
+            previous = value;
+        }
+        check("多点曲线全程单调递增（不会来回抖）", monotonic,
+                "easeIn(0.5)=" + TransitionConfig.Curve.multi(rising).easeIn(0.5F));
+        check("多点曲线在两端精确落在 0 与 1（不会留下残移）",
+                TransitionConfig.Curve.multi(rising).easeIn(0.0F) == 0.0F
+                        && TransitionConfig.Curve.multi(rising).easeIn(1.0F) == 1.0F,
+                "easeIn(0)=" + TransitionConfig.Curve.multi(rising).easeIn(0.0F)
+                        + " easeIn(1)=" + TransitionConfig.Curve.multi(rising).easeIn(1.0F));
+
+        // 贝塞尔 ↔ 多点的互转：切过去看一眼再切回来，形状不能白调
+        float[] roundTrip = TransitionConfig.Curve.multiToBezier(added);
+        check("多点转贝塞尔会得到合法的四个控制点",
+                roundTrip.length == 4
+                        && roundTrip[0] >= 0.0F && roundTrip[0] <= 1.0F
+                        && roundTrip[2] >= 0.0F && roundTrip[2] <= 1.0F,
+                "P1=(" + roundTrip[0] + "," + roundTrip[1] + ") P2=(" + roundTrip[2] + "," + roundTrip[3] + ")");
+        check("退化输入（没有中间点）也能转出可用的控制点",
+                TransitionConfig.Curve.multiToBezier(new float[0]).length == 4,
+                "长度=" + TransitionConfig.Curve.multiToBezier(new float[0]).length);
+
+        // ---------- 15) 按部位分曲线：全局多点 setter 与"部位单独设"的 kind 保持 ----------
+        //
+        // 这里覆盖的是一个**已经真实踩到的 bug**：setPartCurveCustom 曾经无条件把部位切到 custom，
+        // 于是多点曲线（存在同一个 curveCustom 字段里）会被 parseBezier 当成非法输入、
+        // 静默回退成默认控制点 —— 配置里明明存着点集，画出来的却是另一条。
+
+        TransitionConfig.resetToDefaults();
+        TransitionConfig.setPartCurve(TransitionConfig.Part.ITEMS, false,
+                TransitionConfig.Curve.FOLLOW_ID);
+        check("部位默认跟随全局（老配置行为不变）",
+                TransitionConfig.Curve.FOLLOW_ID.equals(
+                        TransitionConfig.partCurveId(TransitionConfig.Part.ITEMS, false)),
+                "id=" + TransitionConfig.partCurveId(TransitionConfig.Part.ITEMS, false));
+        check("跟随全局时取到的就是全局曲线",
+                Math.abs(TransitionConfig.curveFor(TransitionConfig.Part.ITEMS, false).easeOut(0.5F)
+                        - TransitionConfig.openCurve().easeOut(0.5F)) < 1.0e-6F,
+                "部位=" + TransitionConfig.curveFor(TransitionConfig.Part.ITEMS, false).easeOut(0.5F)
+                        + " 全局=" + TransitionConfig.openCurve().easeOut(0.5F));
+
+        // 全局多点 setter
+        TransitionConfig.setOpenCurveMulti("0,0;0.5,0.9;1,1");
+        check("全局渐入可以设成多点曲线（id 与求值都对）",
+                TransitionConfig.Curve.MULTI_ID.equals(TransitionConfig.openCurve().id())
+                        && Math.abs(TransitionConfig.openCurve().easeOut(0.5F) - 0.1F) < 1.0e-4F,
+                "id=" + TransitionConfig.openCurve().id()
+                        + " easeOut(0.5)=" + TransitionConfig.openCurve().easeOut(0.5F));
+
+        // 部位多点 setter
+        TransitionConfig.setPartCurveMulti(TransitionConfig.Part.TEXT, false, "0,0;0.4,0.1;1,1");
+        check("部位可以单独设成多点曲线",
+                TransitionConfig.Curve.MULTI_ID.equals(
+                        TransitionConfig.partCurveId(TransitionConfig.Part.TEXT, false))
+                        && TransitionConfig.curveFor(TransitionConfig.Part.TEXT, false).points() != null,
+                "id=" + TransitionConfig.partCurveId(TransitionConfig.Part.TEXT, false));
+
+        // 这就是那个真实 bug：部位已经是多点曲线时，再调 setPartCurveCustom 不能把它打回 custom
+        TransitionConfig.setPartCurveCustom(TransitionConfig.Part.TEXT, false, "0,0;0.4,0.1;1,1");
+        check("已经是多点的部位，改控制点后**仍然是多点**（不会被打回 custom 而丢点位）",
+                TransitionConfig.Curve.MULTI_ID.equals(
+                        TransitionConfig.partCurveId(TransitionConfig.Part.TEXT, false)),
+                "id=" + TransitionConfig.partCurveId(TransitionConfig.Part.TEXT, false)
+                        + "（曾经在这里被静默改成 custom）");
+
+        // 反向：本来就是贝塞尔的部位，调 setPartCurveCustom 必须切成 custom（不能被这条修复改坏）
+        TransitionConfig.setPartCurve(TransitionConfig.Part.PANEL, false, "cubic");
+        TransitionConfig.setPartCurveCustom(TransitionConfig.Part.PANEL, false, "0.1,0.2,0.3,0.4");
+        check("贝塞尔的部位改控制点后切到 custom（这条修复没有把原行为改坏）",
+                TransitionConfig.Curve.CUSTOM_ID.equals(
+                        TransitionConfig.partCurveId(TransitionConfig.Part.PANEL, false)),
+                "id=" + TransitionConfig.partCurveId(TransitionConfig.Part.PANEL, false));
+
+        // 真正会生效：部位曲线确实参与了透明度计算，而不是只存在配置里。
+        //
+        // **必须先清掉排除列表**：第 1 节测过"排除列表优先生效"，而那个 helper 只在结束时
+        // 把 `excludedScreens` 清空，`excludedSet` 这个缓存集合要等下一次 load/rebuildSets
+        // 才会跟着更新。前两版这里没清，于是这个界面被判成"不参与动画"、
+        // 两层的 alpha 都拿到 1.0（=0 位移的稳定态），断言看到的是 0.0 / 0.0 —— 假红。
+        TransitionConfig.resetToDefaults();
+        TransitionConfig.setDurationMsBoth(2000);
+        TransitionConfig.setPartCurve(TransitionConfig.Part.PANEL, false, "linear");
+        TransitionConfig.setPartCurve(TransitionConfig.Part.ITEMS, false, "linear");
+        TransitionConfig.setOpenCurve("linear");
+        TransitionConfig.setCloseCurve("linear");
+        TransitionConfig.setPartCurveMulti(TransitionConfig.Part.ITEMS, false, "0,0;0.5,0.95;1,1");
+        Screen partScreen = new EmptyContainer();
+        check("前置：这一段用的界面确实参与动画（否则下面测的是稳定态）",
+                UiTransitions.shouldAnimate(partScreen),
+                "excluded=" + TransitionConfig.isExcluded(partScreen.getClass().getName()));
+        openPanel(gui, partScreen);
+        // 沿时间轴采样两层，而不是压在单个时刻上：曲线分离与否应当在全过程都成立，
+        // 测一个瞬间既容易被时序抖动打歪，也说不清"到底是哪一段不对"。
+        float maxGap = 0.0F;
+        int itemAtMax = -1;
+        int panelAtMax = -1;
+        for (int i = 0; i < 12; i++) {
+            Thread.sleep(120);
+            Matrix3x2fStack.reset();
+            UiTransitions.beginContentLayer(partScreen, extractor);
+            int item = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+            UiTransitions.endContentLayer(partScreen, extractor);
+            UiTransitions.beginBackgroundLayer(partScreen, extractor);
+            int panel = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+            UiTransitions.endBackgroundLayer(partScreen, extractor);
+            if (Math.abs(item - panel) > maxGap) {
+                maxGap = Math.abs(item - panel);
+                itemAtMax = item;
+                panelAtMax = panel;
+            }
+        }
+        gui.setScreen(null);
+        Thread.sleep(120);
+        check("同一时刻，底板与物品用的是各自部位的曲线（两条曲线真的分开生效）",
+                maxGap >= 30.0F,
+                "最大差值=" + maxGap + "（物品=" + itemAtMax + " 底板=" + panelAtMax + "）");
+
+        // ---------- 16) 排除列表的字符串切分（双列表界面与配置界面共用同一套） ----------
+        TransitionConfig.setExcludedScreens(" a.b.C ,, d.e.F , ");
+        check("排除列表切分会 trim 并忽略空项",
+                TransitionConfig.excludedEntries().size() == 2
+                        && TransitionConfig.excludedEntries().get(0).equals("a.b.C"),
+                "条数=" + TransitionConfig.excludedEntries().size()
+                        + " 首项=" + TransitionConfig.excludedEntries().get(0));
+        check("列表再拼回去是规范的逗号分隔",
+                TransitionConfig.joinList(TransitionConfig.excludedEntries()).equals("a.b.C,d.e.F"),
+                "内容=" + TransitionConfig.joinList(TransitionConfig.excludedEntries()));
+        check("包名（小写结尾）被识别为前缀，完整类名不是",
+                TransitionConfig.isPrefixEntry("mezz.jei")
+                        && !TransitionConfig.isPrefixEntry("mezz.jei.SomeScreen"),
+                "mezz.jei=" + TransitionConfig.isPrefixEntry("mezz.jei")
+                        + " 类名=" + TransitionConfig.isPrefixEntry("mezz.jei.SomeScreen"));
+        TransitionConfig.setExcludedScreens("");
+
         TransitionConfig.resetToDefaults();
         System.out.println();
         if (failures == 0) {

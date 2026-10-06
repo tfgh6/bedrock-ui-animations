@@ -334,6 +334,13 @@ public final class UiTransitionsConfigScreen {
                 .setSaveConsumer(list -> TransitionConfig.setExcludedScreens(joinScreens(list)))
                 .build());
 
+        // 类名又长又难拼，而这个模组自己知道运行期见过哪些界面 ——
+        // 所以另配了一个**双列表界面**（在上一层的入口页里），点一下就把界面搬进/搬出排除列表。
+        //
+        // 这里只放一段说明、放不了一个能点的按钮：Cloth 的 ConfigEntryBuilder 没有按钮条目
+        // （只有 startStrList/startSubCategory/startTextDescription 这些）。而"自绘条目 + 自己处理点击"
+        // 这条路**已经栽过一次** —— 渲染正常、直接派发点击也能开，但真实鼠标点击传不到它那儿
+        // （详见 UiTransitionsHubScreen 的注释）。所以入口一律用原版按钮，摆在入口页上。
         perScreen.addEntry(entries.startTextDescription(
                 Component.translatable("ui_transitions.config.seen_screens.header")
                         .append("\n").append(seenScreenHint())).build());
@@ -360,37 +367,20 @@ public final class UiTransitionsConfigScreen {
     }
 
 
-    /** "a,b,c" -> ["a","b","c"]（配置文件里是逗号分隔的字符串，界面用列表更好操作） */
+    /**
+     * "a,b,c" -> ["a","b","c"]。
+     *
+     * 实现已挪到 {@link TransitionConfig#splitList}：排除列表现在还有一个**双列表界面**，
+     * 两边必须用同一套切分规则。各写一份的话，只要 trim / 忽略空项的做法有一点不同，
+     * 就会出现"界面上加进去了、配置里其实没写"这类很难查的问题。
+     */
     private static java.util.List<String> splitScreens(String value) {
-        java.util.List<String> out = new java.util.ArrayList<>();
-        if (value != null) {
-            for (String part : value.split(",")) {
-                String trimmed = part.trim();
-                if (!trimmed.isEmpty()) {
-                    out.add(trimmed);
-                }
-            }
-        }
-        return out;
+        return TransitionConfig.splitList(value);
     }
 
     /** ["a","b"] -> "a,b" */
     private static String joinScreens(java.util.List<String> list) {
-        if (list == null) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        for (String item : list) {
-            String trimmed = item == null ? "" : item.trim();
-            if (trimmed.isEmpty()) {
-                continue;
-            }
-            if (sb.length() > 0) {
-                sb.append(',');
-            }
-            sb.append(trimmed);
-        }
-        return sb.toString();
+        return TransitionConfig.joinList(list);
     }
 
     /** 把运行期记录下来的界面类名拼成一段提示文字 */

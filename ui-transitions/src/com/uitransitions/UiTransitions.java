@@ -49,10 +49,8 @@ public final class UiTransitions {
     /** pauseForHud 是否真的抵消过位移（跟随动画那条路不抵消，恢复时也不能补） */
     private static final ThreadLocal<Boolean> HUD_SHIFTED = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
-    /** 当前这一帧的界面是否已收到关闭指令（收到就立即隐藏玩家模型） */
     /** 本帧内容层整体的淡变透明度（帧级：直到下一帧开始才复位，供 HUD 快捷栏判断用） */
     private static volatile float FRAME_FADE_ALPHA = 1.0F;
-    /** 打开界面时，玩家模型的透明度覆盖值；负数表示不干预 */
     /**
      * 内容层本帧的淡变透明度，**帧内跨阶段保留**。
      *
@@ -453,7 +451,7 @@ public final class UiTransitions {
      * 音效字幕：顺带在背景层里绘制，默认既不平移也不淡出
      * （否则打开背包时字幕会跟着一起动）。animateSubtitles=true 时让它一起动画。
      *
-     * 这一对由 HotbarTabExcludeMixin 注入在 {@code Hud.extractDeferredSubtitles} 上，
+     * 这一对由 **HudSubtitleMixin** 注入在 {@code Hud.extractDeferredSubtitles} 上，
      * 因此 Screen / PauseScreen / LoadingOverlay 这些调用点都被覆盖 —— 早期版本只在
      * Screen.extractBackground 的调用点做抵消，暂停菜单自己重写了该方法，字幕照样会动。
      */

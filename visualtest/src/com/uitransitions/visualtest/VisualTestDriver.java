@@ -156,6 +156,24 @@ public final class VisualTestDriver {
             sleep(1000);
         }
 
+        // ---------- 曲线编辑器的**交互**（不需要世界） ----------
+        //
+        // 为什么必须单独有一个交互阶段：截图上"长得对"和"点得到"是两件事，
+        // 这个项目已经因此栽过两次 —— 配置界面里的曲线编辑器条目渲染完全正常，
+        // 但真实鼠标点击传不到它那儿；曲线编辑器本身的预览列宽度也曾经算错，
+        // 静态看代码和看截图都发现不了，只有真的点一下才会暴露。
+        if (phaseEnabled("curveui")) {
+            log("=== 曲线编辑器交互检查 ===");
+            openCurveEditor(minecraft, "OPEN");
+            sleep(1800);
+            probeCurveEditorLayout(minecraft);
+            interactWithCurveEditor(minecraft);
+            sleep(600);
+            capture(minecraft, outDir, "curveui_after", System.nanoTime(), 0);
+            closeScreen(minecraft);
+            sleep(1200);
+        }
+
         // ---------- 进世界：实测真实容器界面（含玩家小模型） ----------
         if (phaseEnabled("world") || phaseEnabled("inventory") || phaseEnabled("enchant")
                 || phaseEnabled("creative")) {
@@ -871,9 +889,351 @@ public final class VisualTestDriver {
         });
     }
 
-    /** 在控件树里按类名找控件（只匹配简单名，避免依赖具体包路径） */
-    private static Object findWidget(Object root, String simpleName) {
+    // ================================================================== 曲线编辑器交互检查
+
+    /**
+     * 把曲线编辑器的布局字段读出来核对。
+     *
+     * 这里专门盯一个**真实发生过的回归**：预览的宽度是"图与列表之间剩多少"算出来的，
+     * 而那段代码一度把 listX 写在 previewWidth 后面 —— 首次 init() 读到的是字段默认值 0，
+     * 预览被兜成 110px 的一条窄带。截图上看是"有点窄"，很难判断是不是 bug；
+     * 但把数字打出来，`预览宽=110 而可用宽度=488` 就是一眼可见的错误。
+     */
+    private static void probeCurveEditorLayout(Minecraft minecraft) {
+        minecraft.execute(() -> {
+            try {
+                Screen screen = minecraft.gui.screen();
+                if (screen == null || !screen.getClass().getSimpleName().contains("CurveScreen")) {
+                    log("布局检查：当前不是曲线编辑器（"
+                            + (screen == null ? "null" : screen.getClass().getName()) + "）");
+                    return;
+                }
+                int graphSize = readIntField(screen, "graphSize");
+                int graphX = readIntField(screen, "graphX");
+                int previewX = readIntField(screen, "previewX");
+                int previewWidth = readIntField(screen, "previewWidth");
+                int listX = readIntField(screen, "listX");
+                boolean showList = Boolean.TRUE.equals(readObjectField(screen, "showPartsPanel"));
+                int gap = listX - (previewX + previewWidth);
+                log(String.format("布局：界面=%dx%d 图=%d@x%d 预览=%d@x%d 列表x=%d 显示列表=%s 预览右缘到列表=%d",
+                        screen.width, screen.height, graphSize, graphX, previewWidth, previewX,
+                        listX, showList, gap));
+                if (previewWidth <= 111 && screen.width >= 700) {
+                    log("!! 问题：预览宽度被兜到了下限（" + previewWidth
+                            + "），而窗口宽度有 " + screen.width + " —— 说明宽度算错了（曾经真的发生过）");
+                } else {
+                    log("布局检查：预览宽度正常 ✅");
+                }
+                if (showList && listX + readIntField(screen, "listWidth") > screen.width) {
+                    log("!! 问题：动画列表超出了右边缘");
+                }
+            } catch (Throwable t) {
+                log("布局检查失败: " + t);
+            }
+        });
+    }
+
+    /** 真的往曲线编辑器上派发点击，并核对"点完的状态对不对" */
+    private static void interactWithCurveEditor(Minecraft minecraft) {
+        minecraft.execute(() -> {
+            try {
+                Screen screen = minecraft.gui.screen();
+                if (screen == null || !screen.getClass().getSimpleName().contains("CurveScreen")) {
+                    log("交互检查：当前不是曲线编辑器，跳过");
+                    return;
+                }
+                int graphX = readIntField(screen, "graphX");
+                int graphY = readIntField(screen, "graphY");
+                int graphSize = readIntField(screen, "graphSize");
+                int listX = readIntField(screen, "listX");
+                int listY = readIntField(screen, "listY");
+                int listWidth = readIntField(screen, "listWidth");
+                boolean showList = Boolean.TRUE.equals(readObjectField(screen, "showPartsPanel"));
+                log("交互开始：界面=" + screen.width + "x" + screen.height
+                        + " 显示列表=" + showList + " 列表x=" + listX + " 宽=" + listWidth);
+                // 把字宽量出来并**按阈值判定**：窄屏下"图下面那行读数放不放得下"完全取决于它，
+                // 靠估算字符个数猜不准（这个阈值就因为"相等也算放得下"而错过一次：
+                // 427 宽下图是 64、读数正好 124、阈值 also 124 → 照旧被切断，只剩 "P1 … P2"）。
+                // 所以这里不只打印，还直接判定，让"读数被截断"变成可发现的失败。
+                int graphSizeForText = readIntField(screen, "graphSize");
+                try {
+                    net.minecraft.client.gui.Font font = minecraft.font;
+                    String both = "P1 0.25,0.10  P2 0.25,1.00";
+                    int readoutWidth = font.width(both);
+                    int threshold = graphSizeForText + 60;
+                    boolean fitsOneLine = readoutWidth + 8 <= threshold;
+                    // 两行时每行是 "P1 0.25,0.10"，也必须放得下
+                    boolean oneLineFits = font.width("P1 0.25,0.10") + 8 <= threshold;
+                    log("读数排版：单行宽=" + readoutWidth + " 阈值=" + threshold
+                            + " 图宽=" + graphSizeForText
+                            + " → " + (fitsOneLine ? "单行" : "两行")
+                            + (fitsOneLine || oneLineFits ? "  ✅" : "  ❌（连单个控制点都放不下）"));
+                } catch (Throwable t) {
+                    log("量字宽失败: " + t);
+                }
+
+                if (!showList) {
+                    log("!! 动画列表没显示（窗口 = " + screen.width + "）—— 部位曲线在这块屏幕上根本选不到");
+                } else {
+                    // 行序与 Part 枚举一致：0 = 全局、1 = PANEL、2 = DIM、3 = ITEMS……
+                    // 点第 3 行（ITEMS）验证"点行名能切编辑对象"。
+                    //
+                    // **必须先 sleep 一帧**：切编辑对象后 listVisibleRows / 滚动位置要等下一次
+                    // 渲染才结算，紧接着点会因为行几何还没更新而落到相邻行上
+                    // （实测：不等的话两次点到的是不同的部位，看起来像"点错了行"）。
+                    int row = 3;
+                    // 行几何按"渲染时算出来的可见行数"核对，别自己猜：
+                    // 面板高度 = 30(表头) + 可见行数×22 + 4，行 y = listY + 30 + row*22。
+                    int visibleRows = readIntField(screen, "listVisibleRows");
+                    log("列表几何：可见行数=" + visibleRows + " 行高=22 首行 y=" + (listY + 30)
+                            + " 滚动=" + readObjectField(screen, "listScroll"));
+                    // 逐行扫一遍、打印每行被点中的部位：一行日志就能把"行几何对不对"钉死，
+                    // 比来回猜坐标快得多（这个检查前后因此返工了两轮）。
+                    int expected = row;
+                    for (int r = 1; r <= 3; r++) {
+                        double probeY = listY + 30 + 22 * r + 10;
+                        click(screen, listX + listWidth / 2.0, probeY);
+                        sleep(200);
+                        Object picked = readObjectField(screen, "part");
+                        int pickedRow = picked == null ? 0 : partOrdinal(picked) + 1;
+                        log("  扫行 y=" + (int) probeY + " -> " + picked
+                                + "（第 " + pickedRow + " 行）" + (pickedRow == r ? " ✅" : " ❌"));
+                    }
+                    double rowY = listY + 30 + 22 * expected + 10;
+                    click(screen, listX + listWidth / 2.0, rowY);
+                    sleep(250);
+                    Object after = readObjectField(screen, "part");
+                    log("点第 " + expected + " 行(y=" + (int) rowY + ")：部位 -> " + after
+                            + (after != null && "ITEMS".equals(after.toString()) ? "  ✅" : "  ❌（预期 ITEMS）"));
+
+                    // ② 点它的小方框：应当在"跟随全局 / 单独设置"之间切换
+                    Object ownBefore = readObjectField(screen, "own");
+                    click(screen, listX + 10, rowY);
+                    sleep(250);
+                    Object ownAfter = readObjectField(screen, "own");
+                    log("点小方框：own " + ownBefore + " -> " + ownAfter
+                            + (Boolean.valueOf(true).equals(ownAfter) ? "  ✅（已单独设置）" : "  ❌（预期 true）"));
+                }
+
+                // ③ 切到多点模式：按钮位置从字段算出来，不猜坐标
+                log("切模式前：own=" + readObjectField(screen, "own")
+                        + " multiMode=" + readObjectField(screen, "multiMode"));
+                if (!clickCurveModeButton(screen)) {
+                    return;     // 按钮点不了（不可编辑等）：后面的加点/删点没有意义
+                }
+                sleep(400);
+                Object multiMode = readObjectField(screen, "multiMode");
+                log("模式切换后 multiMode=" + multiMode
+                        + (Boolean.valueOf(true).equals(multiMode) ? "  ✅" : "  ❌（预期 true）"));
+                if (!Boolean.valueOf(true).equals(multiMode)) {
+                    log("多点模式没切过去，跳过加点/删点检查");
+                    return;
+                }
+
+                // ④ 在图上点一下 → 应当加一个点。
+                //
+                // 先把中间点清空再点：上局跑完时曲线已经被拖过、图上有 5 个中间点，
+                // 随手点的位置可能正好"离已有点太近"而被合理地拒绝 ——
+                // 那不是 bug，却会让这个检查红掉（第一版就是这么误报的）。
+                // 清空之后点在哪个 x 上都该成功。
+                writeObjectField(screen, "multi", new float[0]);
+                int beforePoints = countMulti(screen);
+                click(screen, graphX + graphSize * 0.35, graphY + graphSize * 0.6);
+                int afterPoints = countMulti(screen);
+                log("清空后在图中央点一下：点数 " + beforePoints + " -> " + afterPoints
+                        + (afterPoints == beforePoints + 1 ? "  ✅" : "  ❌（预期 +1）"));
+
+                // ⑤ 滚轮翻列表（装得下时"没得翻"也算正常，只记录）
+                Object scrollTop = readObjectField(screen, "listScroll");
+                boolean scrolled = screen.mouseScrolled(listX + 20, listY + 40, 0.0, -1.0);
+                log("列表滚轮：返回=" + scrolled + " 顶部行 " + scrollTop + " -> "
+                        + readObjectField(screen, "listScroll"));
+
+                // ⑥ Delete 删点（先让鼠标"停在点上"：mouseMoved 会更新 lastMouseX/Y）
+                screen.mouseMoved(graphX + graphSize * 0.35, graphY + graphSize * 0.6);
+                int beforeDelete = countMulti(screen);
+                dispatchDelete(screen);
+                int afterDelete = countMulti(screen);
+                log("Delete 删点：点数 " + beforeDelete + " -> " + afterDelete
+                        + (afterDelete == beforeDelete - 1 ? "  ✅" : "  ❌（预期 -1）"));
+            } catch (Throwable t) {
+                log("交互检查失败: " + t);
+                Throwable cause = t.getCause();
+                while (cause != null) {
+                    log("  根因: " + cause);
+                    cause = cause.getCause();
+                }
+            }
+        });
+    }
+
+    /**
+     * 点"多点 / 控制点"那个模式按钮。
+     *
+     * 位置从屏幕字段算出来，**不猜坐标** —— 布局会随窗口大小变，写死坐标的检查迟早会点空，
+     * 而"点空了"和"功能坏了"在日志里长得一模一样。
+     */
+    private static boolean clickCurveModeButton(Screen screen) {
+        try {
+            int graphX = readIntField(screen, "graphX");
+            int graphSize = readIntField(screen, "graphSize");
+            int y = readIntField(screen, "height") - 24;
+            // 与 buildButtons 里的算法保持一致：宽度按可用空间算，缩到 52 为止
+            int buttonWidth = Math.max(52, Math.min(96, (screen.width - 16 * 2 - 8 * 3) / 4));
+            double x = graphX + buttonWidth + 8 + buttonWidth / 2.0;
+            double centerY = y + 10;
+            // 先确认这个坐标上真的是那个按钮，而不是别的控件
+            Object hit = findWidgetByMessage(screen, "多点");
+            if (hit == null) {
+                hit = findWidgetByMessage(screen, "控制点");
+            }
+            if (hit != null) {
+                net.minecraft.client.gui.navigation.ScreenRectangle bounds =
+                        (net.minecraft.client.gui.navigation.ScreenRectangle)
+                                hit.getClass().getMethod("getRectangle").invoke(hit);
+                x = bounds.left() + bounds.width() / 2.0;
+                centerY = bounds.top() + bounds.height() / 2.0;
+                log("模式按钮位置 " + bounds.left() + "," + bounds.top()
+                        + " 尺寸 " + bounds.width() + "x" + bounds.height()
+                        + " active=" + hit.getClass().getField("active").get(hit));
+            } else {
+                log("按文字没找到模式按钮，改用按布局算出的坐标 (" + (int) x + "," + (int) centerY + ")");
+            }
+            click(screen, x, centerY);
+            return true;
+        } catch (Throwable t) {
+            log("点模式按钮失败: " + t);
+            return false;
+        }
+    }
+
+    /** 部位枚举的序号（界面行序 = 序号 + 1，第 0 行是"全局"）；拿不到返回 -2 */
+    private static int partOrdinal(Object part) {
+        if (part == null) {
+            return -1;      // 全局
+        }
+        try {
+            Object ordinal = part.getClass().getMethod("ordinal").invoke(part);
+            return ordinal instanceof Integer ? (Integer) ordinal : -2;
+        } catch (Throwable t) {
+            return -2;
+        }
+    }
+
+    /** 多点模式下的总点数（含固定的首尾） */
+    private static int countMulti(Screen screen) {        Object multi = readObjectField(screen, "multi");
+        return multi instanceof float[] ? ((float[]) multi).length / 2 + 2 : -1;
+    }
+
+    private static void dispatchDelete(Screen screen) {
+        try {
+            // 261 = GLFW_KEY_DELETE
+            screen.keyPressed(new net.minecraft.client.input.KeyEvent(261, 0, 0));
+        } catch (Throwable t) {
+            log("派发 Delete 失败: " + t);
+        }
+    }
+
+    private static Object findWidgetByMessage(Object root, String text) {
         if (root == null) {
+            return null;
+        }
+        try {
+            java.lang.reflect.Method getMessage = root.getClass().getMethod("getMessage");
+            Object message = getMessage.invoke(root);
+            if (message instanceof Component && ((Component) message).getString().contains(text)) {
+                return root;
+            }
+        } catch (Throwable ignored) {
+            // 不是控件就继续往下找
+        }
+        java.util.List<?> children;
+        try {
+            children = (java.util.List<?>) root.getClass().getMethod("children").invoke(root);
+        } catch (Throwable t) {
+            return null;
+        }
+        if (children == null) {
+            return null;
+        }
+        for (Object child : children) {
+            Object found = findWidgetByMessage(child, text);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    /** 派发一次左键点击（走界面自己的 mouseClicked，与真实鼠标同一条路径） */
+    private static void click(Screen screen, double x, double y) {
+        click(screen, x, y, null);
+    }
+
+    private static void click(Screen screen, double x, double y, Object target) {
+        try {
+            net.minecraft.client.input.MouseButtonInfo info =
+                    new net.minecraft.client.input.MouseButtonInfo(0, 0);
+            net.minecraft.client.input.MouseButtonEvent event =
+                    new net.minecraft.client.input.MouseButtonEvent(x, y, info);
+            boolean result = screen.mouseClicked(event, false);
+            if (target == null) {
+                log(String.format("点击 (%.0f,%.0f) -> %s", x, y, result ? "已处理 ✅" : "没人处理 ❌"));
+            }
+            screen.mouseReleased(event);
+        } catch (Throwable t) {
+            log("派发点击失败: " + t);
+        }
+    }
+
+    private static int readIntField(Object target, String name) {
+        Object value = readObjectField(target, name);
+        return value instanceof Integer ? (Integer) value : -1;
+    }
+
+    /** 读私有字段（只用于测试驱动，不进模组本体） */
+    private static Object readObjectField(Object target, String name) {
+        if (target == null) {
+            return null;
+        }
+        Class<?> type = target.getClass();
+        while (type != null) {
+            try {
+                java.lang.reflect.Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                return field.get(target);
+            } catch (NoSuchFieldException e) {
+                type = type.getSuperclass();
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /** 写私有字段：只为把被测状态摆到一个确定的起点（例如清空曲线上的点） */
+    private static void writeObjectField(Object target, String name, Object value) {
+        if (target == null) {
+            return;
+        }
+        Class<?> type = target.getClass();
+        while (type != null) {
+            try {
+                java.lang.reflect.Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                field.set(target, value);
+                return;
+            } catch (NoSuchFieldException e) {
+                type = type.getSuperclass();
+            } catch (Throwable t) {
+                log("写字段 " + name + " 失败: " + t);
+                return;
+            }
+        }
+    }
+
+    /** 在控件树里按类名找控件（只匹配简单名，避免依赖具体包路径） */
+    private static Object findWidget(Object root, String simpleName) {        if (root == null) {
             return null;
         }
         if (root.getClass().getSimpleName().equals(simpleName)) {

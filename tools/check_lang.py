@@ -28,8 +28,25 @@ LANG_DIR = os.path.join(REPO, "ui-transitions", "resources", "assets",
 LANGS = ["zh_cn.json", "en_us.json"]
 PREFIX = "ui_transitions."
 
-# 这些键在代码里是动态拼出来的，静态扫不到；列在这里免得被当成"多余的定义"
-DYNAMIC_OK = set()
+# 这些键在代码里是动态拼出来的，静态扫不到；列在这里免得被当成"多余的定义"。
+#
+# 「部位」的名字是按枚举 id 拼的：`"ui_transitions.part." + part.id()`。
+# 正则只认到那个裸前缀，拼出来的完整键它看不见 —— 所以**两种都要列**：
+#   · "ui_transitions.part."          —— 代码里那个拼接口
+#   · "ui_transitions.part.<部位id>"  —— 真正会被显示出来的键
+# 7 条一个都不能少：漏一条的症状是界面上直接印出
+# "ui_transitions.part.portal" 这种原始键名，而编译、注入核对、状态机断言
+# 全都看不出来（和 Sodium 那批键是同一类问题，所以用同一套机制管）。
+DYNAMIC_OK = {
+    "ui_transitions.part.",
+    "ui_transitions.part.panel",
+    "ui_transitions.part.dim",
+    "ui_transitions.part.items",
+    "ui_transitions.part.text",
+    "ui_transitions.part.subtitles",
+    "ui_transitions.part.tab",
+    "ui_transitions.part.portal",
+}
 
 
 def strip_comments(src):
@@ -118,8 +135,24 @@ def main():
     used = used_keys()
     problems = []
 
+    def dynamic(key):
+        """
+        动态键豁免。
+
+        注册在 DYNAMIC_OK 里的键有**两种形态**，必须都放过，否则这个机制等于没有：
+          · 完整键（"ui_transitions.part.portal"）—— 不会作为字面量出现在代码里，
+            它只出现在语言文件中，所以会被第 3 关当成孤儿；
+          · 裸前缀（"ui_transitions.part."）—— 它**是**字面量、能被扫到，
+            但它不是一个真的键，语言文件里永远不会、也不该有它，
+            所以会被第 1 关当成"缺失"。
+        原先只在第 3 关用 DYNAMIC_OK，于是第二种形态无论如何都过不了。
+        """
+        return key in DYNAMIC_OK or any(key.startswith(known) for known in DYNAMIC_OK)
+
     # 1) 代码里用到、但某个语言里没有
     for key, where in sorted(used.items()):
+        if dynamic(key):
+            continue
         for name in LANGS:
             if key not in tables[name]:
                 problems.append("键 %s 在 %s 里缺失（用于 %s）" % (key, name, where[0]))
@@ -135,7 +168,7 @@ def main():
 
     # 3) 定义了但代码里没用（多半是改文案时留下的孤儿）
     for key in sorted(set(tables[base])):
-        if key not in used and key not in DYNAMIC_OK:
+        if key not in used and not dynamic(key):
             problems.append("键 %s 定义了但代码里没有用到" % key)
 
     # 4) 值不能是空的
