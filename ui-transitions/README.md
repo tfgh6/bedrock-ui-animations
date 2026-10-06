@@ -1,28 +1,25 @@
-# Bedrock UI Animations 1.0.1
+# Bedrock UI Animations 1.5.0
 
 为**容器 / 菜单界面**添加过渡动画：打开时自下而上滑入并淡入，关闭时向下滑出并淡出（基岩版手感）。
 **纯客户端**，同一个 jar 同时支持 **Fabric** 与 **NeoForge**。
 
 - 产物：**一个文件，两个加载器通用**
-  - uild/ui-transitions/Bedrock-UI-Animations-1.0.1-fabric+neoforge.jar（62,684 字节）
-  - 内含两套元数据：abric.mod.json + META-INF/neoforge.mods.toml，Fabric 与 NeoForge 各读自己那份，装同一个文件即可
-  - 版本约定：**每修一次 +0.01**（本次 1.0.1）
-- 图标：jar 内两处都有 —— ssets/ui_transitions/icon.png（128×128，8bit RGBA + 透明背景）与根目录 icon.png；
-  Fabric 走 abric.mod.json 的 icon，NeoForge 走 
-eoforge.mods.toml 的 logoFile。生成脚本：ui-transitions/make_icon.py
-- 注意：部分启动器看到 
-eoforge.mods.toml 就会把该文件标注为 NeoForge 模组（它自己的判定顺序，与能否加载无关）；
-  游戏内两个加载器都能正常加载。若确实需要启动器分类也正确，可用 uild_release.py 拆成两份（默认不这么做）。
+  - `build/ui-transitions/Bedrock-UI-Animations-1.5.0-fabric+neoforge.jar`
+  - 内含两套元数据：`fabric.mod.json` + `META-INF/neoforge.mods.toml`，Fabric 与 NeoForge 各读自己那份，装同一个文件即可
+  - 版本约定：**每修一次 +0.01**（本次 1.5.0；1.4.4 → 1.5.0 是"逐部位曲线 / 多点曲线 / 排除界面"三块新功能，见 5.5 节）
+- 图标：jar 内两处都有 —— `assets/ui_transitions/icon.png`（128×128，8bit RGBA + 透明背景）与根目录 `icon.png`；
+  Fabric 走 `fabric.mod.json` 的 `icon`，NeoForge 走 `neoforge.mods.toml` 的 `logoFile`。生成脚本：`ui-transitions/make_icon.py`
+- 注意：部分启动器看到 `neoforge.mods.toml` 就会把该文件标注为 NeoForge 模组（它自己的判定顺序，与能否加载无关）；
+  游戏内两个加载器都能正常加载。若确实需要启动器分类也正确，可用 `build_release.py` 拆成两份（默认不这么做）。
 - 名称：显示名 **Bedrock UI Animations**；内部 modId 仍是 `ui_transitions`
   （不改 id 是为了不破坏你已有的 `config/ui-transitions.properties` 和 Sodium 选项键）
-- 图标：`ui-transitions/resources/assets/ui_transitions/icon.png`（128×128，**8bit RGBA + 透明背景**）
-  —— Fabric 用 `fabric.mod.json` 的 `icon`、NeoForge 用 `neoforge.mods.toml` 的 `logoFile`；
-  同一个文件另外在 jar **根目录**也放了一份 `icon.png`，兼容只扫根目录的启动器。生成脚本：`ui-transitions/make_icon.py`
 - 作者：**KurumiのZaphkiel**、**JiaWang-sama**
 - 目标：Minecraft **26.3**（Fabric Loader ≥ 0.16 / NeoForge 26.3）
 - 源码：`ui-transitions/src/` · 元数据：`ui-transitions/resources/` · 打包：`ui-transitions/build_jar.py`
 - Gradle 工程：`ui-transitions/`（Loom 1.18 + Gradle 9.7.1 + JDK 25）
 - 实机截图：`build/visual-out/`（四态对比图 `montage2.png`）
+- 版本号写在三处，**必须一起改**：`resources/fabric.mod.json`、`resources/META-INF/neoforge.mods.toml`、`gradle.properties`
+  （`build_jar.py` 会校验前两者与 MANIFEST 一致，漏一处直接打包失败）
 
 ---
 
@@ -304,7 +301,7 @@ Mod List:
 
 ---
 
-## 5.5 逐部位曲线 / 多点曲线 / 排除列表（1.5.0 待发布）
+## 5.5 逐部位曲线 / 多点曲线 / 排除列表（1.5.0）
 
 三块功能：**每个部位一条自己的渐入渐出曲线**、**鼠标拖点画曲线**、**点选式排除界面**。
 
