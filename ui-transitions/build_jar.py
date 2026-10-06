@@ -92,18 +92,21 @@ def check_sources_fresh():
                 m = os.path.getmtime(p)
                 if m > newest_src:
                     newest_src, newest_src_path = m, p
-    oldest_cls, oldest_cls_path = None, None
+    # 比"最新的 class"而不是"最早的 class"：javac 不会重写内容没变的 class 文件，
+    # 所以只要改过一次代码，最早那个 class 就永远是旧的 —— 拿它比会一直误报。
+    # 真正有意义的信号是"最新源码比最新产物还新"，那才说明这次压根没编译。
+    newest_cls, newest_cls_path = None, None
     for root, _, files in os.walk(CLASSES):
         for f in files:
             if f.endswith(".class"):
                 p = os.path.join(root, f)
                 m = os.path.getmtime(p)
-                if oldest_cls is None or m < oldest_cls:
-                    oldest_cls, oldest_cls_path = m, p
-    if newest_src and oldest_cls and newest_src > oldest_cls:
+                if newest_cls is None or m > newest_cls:
+                    newest_cls, newest_cls_path = m, p
+    if newest_src and newest_cls and newest_src > newest_cls:
         print("  [警告] 源码比编译产物新，可能打进旧 class：")
         print("         %s" % os.path.relpath(newest_src_path, WORK))
-        print("         早于 %s" % os.path.relpath(oldest_cls_path, WORK))
+        print("         晚于 %s" % os.path.relpath(newest_cls_path, WORK))
 
 
 def check_mixin_targets():
