@@ -87,10 +87,10 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
                 .setStorageHandler(TransitionConfig::save));
 
         anim.addOption(intOption(builder, "duration_ms", "动画时长",
-                "滑入滑出持续的时间；默认 500 毫秒。太短会看起来像闪一下",
+                "渐入与渐出一起设定的快捷项；默认 500 毫秒。要分开调请用 Cloth Config 的配置界面",
                 TransitionConfig.DEFAULT_DURATION_MS,
                 TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS, 10,
-                TransitionConfig::setDurationMs,
+                TransitionConfig::setDurationMsBoth,
                 value -> tr(value + " 毫秒")));
 
         anim.addOption(intOption(builder, "offset", "位移距离", "界面滑动多少像素，默认 120；0 = 只淡入淡出",
@@ -205,7 +205,7 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
 
     private static int intGetter(String key) {
         return switch (key) {
-            case "duration_ms" -> TransitionConfig.durationMs();
+            case "duration_ms" -> TransitionConfig.openDurationMs();
             case "offset" -> Math.round(TransitionConfig.offset());
             case "jelly" -> Math.round(TransitionConfig.jelly() * 100.0F);
             case "curve" -> curveIndex(TransitionConfig.curve());

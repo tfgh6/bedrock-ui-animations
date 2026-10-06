@@ -386,6 +386,83 @@ public class VerifyAdvanced {
                 afterInterrupt < 60 && afterInterrupt < midRamp,
                 "爬升中=" + midRamp + " 再次滚动后=" + afterInterrupt);
 
+        // ---------- 11) 渐入/渐出分开、自定义曲线、玩家模型跟随 ----------
+        TransitionConfig.setOpenDurationMs(200);
+        TransitionConfig.setCloseDurationMs(800);
+        check("渐入与渐出时长可以分开设",
+                TransitionConfig.openDurationMs() == 200 && TransitionConfig.closeDurationMs() == 800,
+                "渐入=" + TransitionConfig.openDurationMs() + " 渐出=" + TransitionConfig.closeDurationMs());
+
+        gui.setScreen(new Screen());
+        Screen split = new EmptyContainer();
+        openPanel(gui, split);
+        Thread.sleep(300);                                  // 超过渐入的 200ms
+        UiTransitions.beginContentLayer(split, extractor);
+        int afterOpen = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endContentLayer(split, extractor);
+        check("渐入按自己的 200ms 走完", afterOpen == 255, "alpha=" + afterOpen);
+
+        UiTransitions.interceptSetScreen(gui, null);        // 触发关闭：渐出应为 800ms
+        Thread.sleep(300);                                  // 只过了 300ms，应该还在淡出
+        UiTransitions.beginContentLayer(split, extractor);
+        int midClose = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endContentLayer(split, extractor);
+        check("渐出按自己的 800ms 走（300ms 时仍未结束）",
+                midClose > 0 && midClose < 255, "alpha=" + midClose);
+
+        // 自定义曲线：同一时刻的缓动结果必须随参数变化
+        TransitionConfig.setCurveCustom("0,0,1,1");          // 与线性等价
+        float linearLike = customEaseOut(0.5F);
+        TransitionConfig.setCurveCustom("0.34,1.56,0.64,1"); // 带回弹
+        float bouncy = customEaseOut(0.5F);
+        check("自定义曲线参数会实际改变缓动结果",
+                Math.abs(linearLike - bouncy) > 0.05F,
+                "线性等价=" + linearLike + " 回弹=" + bouncy);
+        check("非法自定义参数回退到默认值",
+                TransitionConfig.parseBezier("不是数字")[0] == 0.25F
+                        && !TransitionConfig.isValidBezier("不是数字"),
+                "x1=" + TransitionConfig.parseBezier("不是数字")[0]);
+        check("自定义参数的 x 会被夹到 0..1",
+                TransitionConfig.parseBezier("2,0,3,1")[0] == 1.0F
+                        && TransitionConfig.parseBezier("2,0,3,1")[2] == 1.0F,
+                "x1=" + TransitionConfig.parseBezier("2,0,3,1")[0]
+                        + " x2=" + TransitionConfig.parseBezier("2,0,3,1")[2]);
+
+        // 玩家模型：跟随模式应与内容层同透明度，而不是被推迟或隐藏
+        TransitionConfig.setFade(true);
+        TransitionConfig.setPlayerModelFollowsAnimation(true);
+        TransitionConfig.setDurationMsBoth(2000);
+        gui.setScreen(new Screen());
+        Screen pipHost = new EmptyContainer();
+        openPanel(gui, pipHost);
+        UiTransitions.beginContentLayer(pipHost, extractor);
+        UiTransitions.endContentLayer(pipHost, extractor);
+        Thread.sleep(1000);                                 // 走到打开动画中段
+        UiTransitions.beginContentLayer(pipHost, extractor);
+        int layerAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        Object fakeEntity = new FakeGuiEntityState();
+        UiTransitions.beginPipBlit(fakeEntity);
+        int followAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endPipBlit();
+        UiTransitions.endContentLayer(pipHost, extractor);
+        check("玩家模型跟随动画时与内容层同透明度",
+                followAlpha == layerAlpha && followAlpha < 255,
+                "内容层=" + layerAlpha + " 模型=" + followAlpha);
+
+        TransitionConfig.setPlayerModelFollowsAnimation(false);
+        TransitionConfig.setHidePlayerModelOnClose(true);
+        UiTransitions.interceptSetScreen(gui, null);        // 触发关闭 -> HIDE_PREVIEW
+        Thread.sleep(100);
+        UiTransitions.beginContentLayer(pipHost, extractor);
+        UiTransitions.beginPipBlit(fakeEntity);
+        int hiddenAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endPipBlit();
+        UiTransitions.endContentLayer(pipHost, extractor);
+        check("关掉跟随开关后恢复旧行为（关闭时直接隐藏模型）",
+                hiddenAlpha == 0, "alpha=" + hiddenAlpha);
+
+        UiTransitions.setOverlayModPresentForTest(null);
+
         TransitionConfig.resetToDefaults();
         System.out.println();
         if (failures == 0) {
@@ -454,5 +531,15 @@ public class VerifyAdvanced {
     }
 
     static class EmptyContainer extends AbstractContainerScreen<Object> {
+    }
+
+    /** 把通用曲线设成 custom 并求某一时刻的缓出值 */
+    private static float customEaseOut(float t) {
+        TransitionConfig.setCurveId("custom");
+        return TransitionConfig.curve().easeOut(t);
+    }
+
+    /** 类名里含 "Entity"，用来命中 isPlayerPreview 的判定 */
+    static class FakeGuiEntityState {
     }
 }

@@ -14,11 +14,13 @@
 底板、槽位、物品、文字是一个整体一起动，不会出现"物品在动、底板却硬邦邦"的割裂感。
 
 - **分层独立开关** —— 底板 / 遮罩 / 字幕 / 物品 / 文字，各自可单独关掉
-- **8 种缓动曲线** —— `linear` `sine` `cubic`（默认）`quart` `quint` `expo` `circ` `back`
+- **渐入与渐出分开调** —— 时长和曲线都能分别设（例如渐入 500 / 渐出 350，关闭更利落）
+- **8 种缓动曲线 + 自定义** —— `linear` `sine` `cubic`（默认）`quart` `quint` `expo` `circ` `back`，
+  以及 `custom`：填四个贝塞尔控制点，语法同 CSS 的 `cubic-bezier()`
 - **果冻回弹** —— 冲过静止位置再回落，0–100% 可调（默认关闭）
 - **打断平滑** —— 动画播到一半又开关，会从当前可见状态**接着走**，不跳变
 - **关闭时内容提前淡出** —— 物品与文字比底板略早结束，避免出现"底板还在、格子已经空了"的空洞
-- **玩家模型延迟淡入** —— 打开界面时小模型晚一点浮现（延迟比例可调）；关闭时直接隐藏
+- **玩家模型跟随动画** —— 背包里的小模型和界面一起淡（也可切回"延迟浮现 + 关闭即隐藏"的旧手感）
 
 ### 原地淡变（不重建界面的那些切换）
 
@@ -36,9 +38,9 @@
 ### 适配与容错
 
 - 创造模式的搜索标签、配方书翻页、以及 **JEI / EMI / REI** 的物品管理器界面一并适配
+- **附魔台的附魔书**、地图、旗帜预览都会跟界面一起淡变
 - 装了 JEI 这类"在界面上叠固定按钮"的模组时，自动改为**只淡变不位移**，避免那些按钮被带走（可关）
-- 某个界面该动没动、不该动却在动？用 `excludedScreens` / `extraScreens` 单独调整即可，
-  支持写类名，也支持只写包名前缀
+- 某个界面该动没动、不该动却在动？「界面开关」页里逐行添加即可，支持类名与前缀
 
 ---
 
@@ -71,9 +73,13 @@
 
 ```properties
 enabled=true                  # 总开关
-durationMs=500                # 动画时长（50–5000 毫秒）
+openDurationMs=500            # 渐入（打开界面）时长（50–5000 毫秒）
+closeDurationMs=500           # 渐出（关闭界面）时长（50–5000 毫秒）
 offset=120.0                  # 位移距离（像素，0 = 只淡变不位移）
-curve=cubic                   # 缓动曲线
+curve=cubic                   # 通用缓动曲线
+openCurve=cubic               # 渐入专用曲线（可与通用不同）
+closeCurve=cubic              # 渐出专用曲线
+curveCustom=0.25,0.1,0.25,1.0 # 自定义曲线的贝塞尔控制点 x1,y1,x2,y2
 jelly=0.0                     # 果冻回弹强度（0 = 关闭）
 fade=true                     # 逐元素淡入淡出总开关
 fadeDim=true                  # 遮罩随动画淡出
@@ -91,13 +97,22 @@ scrollFadeBand=200            # 滚动逐格渐变的渐变带高度（16–300 
 scrollFadeMin=0               # 滚动时进入边那一侧的最低透明度（0–100 %，0 = 完全淡出）
 animateSameTypeSwitch=true    # 同类界面换页也做动画（默认做）
 animateAllScreens=false       # 所有界面都加动画（默认只做容器界面）
-hidePlayerModelOnClose=true   # 关闭界面时立即隐藏玩家模型
-previewFadeDelay=35           # 打开时玩家模型延迟多久开始淡入（占动画时长 %）
+playerModelFollowsAnimation=true  # 玩家模型跟随界面动画一起淡
+hidePlayerModelOnClose=true   # 仅在上面关掉时生效：关闭界面时立即隐藏玩家模型
+previewFadeDelay=35           # 仅在上面关掉时生效：打开时玩家模型延迟淡入（占时长 %）
 overlayModsFadeOnly=true      # 装了 JEI 类模组时改为只淡变不位移
 allowLookDuringClose=true     # 关闭动画期间是否允许转动视角
 extraScreens=mezz.jei,dev.emi.emi,me.shedaniel.rei
-excludedScreens=              # 排除某些界面（按前缀匹配，可写类名或包名）
+excludedScreens=              # 不做动画的界面（按前缀匹配，可写类名或包名）
 ```
+
+> **每个界面都能单独开关**：Cloth 配置界面里有「界面开关」页，
+> 用列表逐行添加要关掉的界面（写类名或包名都行），
+> 并且会列出**最近见过的界面**供你直接照抄。
+>
+> `curve` 写 `custom` 就会启用 `curveCustom` 里的控制点，语法和 CSS 的
+> `cubic-bezier(x1,y1,x2,y2)` 一致，`y` 可以超过 1 做过冲。
+> 从旧版本升级时，原来的 `durationMs` / `curve` 会自动套用到渐入与渐出两边。
 
 ---
 

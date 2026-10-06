@@ -20,7 +20,7 @@ import java.util.Set;
 public final class TransitionConfig {
 
     /**
-     * 默认动画时长。
+     * 默认动画时长（渐入与渐出各自的默认值）。
      *
      * 300ms 起步太快：缓出曲线在前 100ms 就冲到将近 70% 的不透明度，
      * 观感上更像"闪一下"而不是"淡入"。500ms 让淡变真正看得出来。
@@ -38,6 +38,9 @@ public final class TransitionConfig {
     public static final int MIN_TAB_SWITCH_MS = 50;
     public static final int MAX_TAB_SWITCH_MS = 2000;
 
+    /** 自定义曲线的默认控制点（与 CSS 的 ease 接近） */
+    public static final String DEFAULT_CUSTOM_BEZIER = "0.25,0.1,0.25,1.0";
+
     private static final float MIN_OFFSET = 0.0F;
     private static final float MAX_OFFSET = 400.0F;
 
@@ -45,7 +48,9 @@ public final class TransitionConfig {
 
     // 热路径字段一律 volatile：渲染线程每帧都会读，不加锁也不分配
     private static volatile boolean enabled = true;
-    private static volatile int durationMs = DEFAULT_DURATION_MS;
+    /** 渐入（打开界面）与渐出（关闭界面）各自独立 */
+    private static volatile int openDurationMs = DEFAULT_DURATION_MS;
+    private static volatile int closeDurationMs = DEFAULT_DURATION_MS;
     private static volatile float offset = DEFAULT_OFFSET;
     private static volatile boolean fade = true;
     private static volatile boolean fadeDim = true;
@@ -75,6 +80,19 @@ public final class TransitionConfig {
     private static volatile String curveId = "cubic";
     /** 解析好的曲线枚举：curve() 在渲染热路径上，不能每次都解析字符串 */
     private static volatile Curve curveCache = Curve.CUBIC;
+    /** 渐入 / 渐出的曲线，可与通用曲线不同 */
+    private static volatile String openCurveId = "cubic";
+    private static volatile String closeCurveId = "cubic";
+    private static volatile Curve openCurveCache = Curve.CUBIC;
+    private static volatile Curve closeCurveCache = Curve.CUBIC;
+    /** 自定义曲线的控制点（原始字符串 + 解析结果） */
+    private static volatile String curveCustom = DEFAULT_CUSTOM_BEZIER;
+    private static volatile float[] customBezierCache = parseBezier(DEFAULT_CUSTOM_BEZIER);
+    /** 玩家模型（布娃娃）是否完全跟随界面动画 */
+    private static volatile boolean playerModelFollowsAnimation = true;
+    /** 运行期见过的界面类名（供配置界面提示用），有上限，避免无限增长 */
+    private static final java.util.LinkedHashSet<String> SEEN_SCREENS = new java.util.LinkedHashSet<>();
+    private static final int MAX_SEEN_SCREENS = 120;
     /** 上次写盘的完整内容，用来跳过"什么都没变"的重复写 */
     private static String lastWritten = null;
     /** 上面那份内容对应的文件路径：换了游戏目录就不能再拿它当"已写过"的依据 */
@@ -94,7 +112,9 @@ public final class TransitionConfig {
         QUINT("quint"),
         EXPO("expo"),
         CIRC("circ"),
-        BACK("back");
+        BACK("back"),
+        /** 自定义：用 curveCustom 里的三次贝塞尔控制点 */
+        CUSTOM("custom");
 
         private final String id;
 
@@ -118,7 +138,47 @@ public final class TransitionConfig {
                 case EXPO -> x <= 0.0F ? 0.0F : (float) Math.pow(2.0, 10.0 * x - 10.0);
                 case CIRC -> 1.0F - (float) Math.sqrt(Math.max(0.0, 1.0 - (double) x * x));
                 case BACK -> 2.70158F * x * x * x - 1.70158F * x * x;
+                case CUSTOM -> customBezier(x);
             };
+        }
+
+        /**
+         * 三次贝塞尔缓动，控制点由配置里的 curveCustom 给出（P0=(0,0)、P3=(1,1) 固定）。
+         *
+         * 和 CSS 的 cubic-bezier() 是同一套：先按 x 反解参数 t，再取该 t 处的 y。
+         * 这里用二分而不是牛顿迭代 —— 只求 30 次、不依赖导数，碰到退化控制点也不会炸。
+         */
+        private static float customBezier(float x) {
+            float[] points = TransitionConfig.customBezier();
+            float x1 = points[0];
+            float y1 = points[1];
+            float x2 = points[2];
+            float y2 = points[3];
+            if (x <= 0.0F) {
+                return 0.0F;
+            }
+            if (x >= 1.0F) {
+                return 1.0F;
+            }
+            float lo = 0.0F;
+            float hi = 1.0F;
+            float t = x;
+            for (int i = 0; i < 30; i++) {
+                t = (lo + hi) * 0.5F;
+                float current = bezierAxis(t, x1, x2);
+                if (current < x) {
+                    lo = t;
+                } else {
+                    hi = t;
+                }
+            }
+            return Math.max(0.0F, Math.min(1.0F, bezierAxis(t, y1, y2)));
+        }
+
+        /** 三次贝塞尔在参数 t 处的某一维取值（端点固定为 0 与 1） */
+        private static float bezierAxis(float t, float p1, float p2) {
+            float u = 1.0F - t;
+            return 3.0F * u * u * t * p1 + 3.0F * u * t * t * p2 + t * t * t;
         }
 
         /** 关闭用：缓入 */
@@ -200,7 +260,6 @@ public final class TransitionConfig {
             }
         }
         enabled = readBoolean(properties, "enabled", enabled);
-        durationMs = clampDuration(readInt(properties, "durationMs", durationMs));
         offset = clampOffset(readFloat(properties, "offset", offset));
         fade = readBoolean(properties, "fade", fade);
         fadeDim = readBoolean(properties, "fadeDim", fadeDim);
@@ -225,7 +284,17 @@ public final class TransitionConfig {
         previewFadeDelay = Math.max(0, Math.min(100, readInt(properties, "previewFadeDelay", previewFadeDelay)));
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
-        setCurveIdInternal(properties.getProperty("curve", curveId));
+        // 迁移：老配置里只有一个 durationMs / curve，把它当作渐入渐出共同的值
+        int legacyDuration = clampDuration(readInt(properties, "durationMs", DEFAULT_DURATION_MS));
+        String legacyCurve = properties.getProperty("curve", curveId);
+        openDurationMs = clampDuration(readInt(properties, "openDurationMs", legacyDuration));
+        closeDurationMs = clampDuration(readInt(properties, "closeDurationMs", legacyDuration));
+        setOpenCurveInternal(properties.getProperty("openCurve", legacyCurve));
+        setCloseCurveInternal(properties.getProperty("closeCurve", legacyCurve));
+        setCurveIdInternal(legacyCurve);
+        setCurveCustomInternal(properties.getProperty("curveCustom", curveCustom));
+        playerModelFollowsAnimation = readBoolean(properties, "playerModelFollowsAnimation",
+                playerModelFollowsAnimation);
         rebuildSets();
         // 只有在文件本来就不存在时才回写（首次运行生成默认配置）。
         // 否则"读一次配置"就会重写用户的文件，把注释和未知键全丢掉。
@@ -245,9 +314,16 @@ public final class TransitionConfig {
         }
         Properties properties = new Properties();
         properties.setProperty("enabled", Boolean.toString(enabled));
-        properties.setProperty("durationMs", Integer.toString(durationMs));
+        // durationMs / curve 已拆成渐入渐出两项，不再写出；
+        // 但 load() 仍会读它们，好让老配置平滑迁移过来
+        properties.setProperty("openDurationMs", Integer.toString(openDurationMs));
+        properties.setProperty("closeDurationMs", Integer.toString(closeDurationMs));
         properties.setProperty("offset", Float.toString(offset));
         properties.setProperty("curve", curveId);
+        properties.setProperty("openCurve", openCurveId);
+        properties.setProperty("closeCurve", closeCurveId);
+        properties.setProperty("curveCustom", curveCustom);
+        properties.setProperty("playerModelFollowsAnimation", Boolean.toString(playerModelFollowsAnimation));
         properties.setProperty("fade", Boolean.toString(fade));
         properties.setProperty("fadeDim", Boolean.toString(fadeDim));
         properties.setProperty("fadeItems", Boolean.toString(fadeItems));
@@ -299,7 +375,8 @@ public final class TransitionConfig {
 
     public static synchronized void resetToDefaults() {
         enabled = true;
-        durationMs = DEFAULT_DURATION_MS;
+        openDurationMs = DEFAULT_DURATION_MS;
+        closeDurationMs = DEFAULT_DURATION_MS;
         offset = DEFAULT_OFFSET;
         fade = true;
         fadeDim = true;
@@ -326,6 +403,13 @@ public final class TransitionConfig {
         extraScreens = DEFAULT_EXTRA_SCREENS;
         curveId = Curve.CUBIC.id();
         curveCache = Curve.CUBIC;
+        openCurveId = Curve.CUBIC.id();
+        openCurveCache = Curve.CUBIC;
+        closeCurveId = Curve.CUBIC.id();
+        closeCurveCache = Curve.CUBIC;
+        curveCustom = DEFAULT_CUSTOM_BEZIER;
+        customBezierCache = parseBezier(DEFAULT_CUSTOM_BEZIER);
+        playerModelFollowsAnimation = true;
         rebuildSets();
         save();
     }
@@ -336,8 +420,20 @@ public final class TransitionConfig {
         return enabled;
     }
 
-    public static int durationMs() {
-        return durationMs;
+    /** 打开界面时的动画时长（毫秒）——「渐入」 */
+    public static int openDurationMs() {
+        return openDurationMs;
+    }
+
+    /** 关闭界面时的动画时长（毫秒）——「渐出」 */
+    public static int closeDurationMs() {
+        return closeDurationMs;
+    }
+
+    /** 兼容旧调用：把渐入渐出一起设成同一个值 */
+    public static void setDurationMsBoth(int value) {
+        setOpenDurationMs(value);
+        setCloseDurationMs(value);
     }
 
     public static float offset() {
@@ -462,6 +558,100 @@ public final class TransitionConfig {
         return curveCache;
     }
 
+    /** 渐入（打开）用的曲线 */
+    public static Curve openCurve() {
+        return openCurveCache;
+    }
+
+    /** 渐出（关闭）用的曲线 */
+    public static Curve closeCurve() {
+        return closeCurveCache;
+    }
+
+    /** 自定义曲线的控制点 x1,y1,x2,y2（已经校验并夹紧） */
+    public static float[] customBezier() {
+        return customBezierCache;
+    }
+
+    public static String curveCustom() {
+        return curveCustom;
+    }
+
+    /** 校验并解析 "x1,y1,x2,y2"；非法输入回退到默认值 */
+    public static float[] parseBezier(String value) {
+        if (value != null) {
+            String[] parts = value.split(",");
+            if (parts.length == 4) {
+                try {
+                    float x1 = Float.parseFloat(parts[0].trim());
+                    float y1 = Float.parseFloat(parts[1].trim());
+                    float x2 = Float.parseFloat(parts[2].trim());
+                    float y2 = Float.parseFloat(parts[3].trim());
+                    // x 必须落在 0..1（否则 x(t) 不再单调，反解会失真）；
+                    // y 允许超出，这样能做出回弹/过冲
+                    return new float[] { clamp01(x1), clampY(y1), clamp01(x2), clampY(y2) };
+                } catch (NumberFormatException ignored) {
+                    // 落到默认值
+                }
+            }
+        }
+        return new float[] { 0.25F, 0.1F, 0.25F, 1.0F };
+    }
+
+    /** 自定义曲线参数是否合法（配置界面用来提示） */
+    public static boolean isValidBezier(String value) {
+        if (value == null) {
+            return false;
+        }
+        String[] parts = value.split(",");
+        if (parts.length != 4) {
+            return false;
+        }
+        for (String part : parts) {
+            try {
+                if (Float.isNaN(Float.parseFloat(part.trim()))) {
+                    return false;
+                }
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static float clamp01(float v) {
+        return Math.max(0.0F, Math.min(1.0F, v));
+    }
+
+    private static float clampY(float v) {
+        return Math.max(-2.0F, Math.min(3.0F, v));
+    }
+
+    /** 玩家模型（布娃娃）是否完全跟随界面动画（不延迟淡入、关闭时也不提前隐藏） */
+    public static boolean playerModelFollowsAnimation() {
+        return playerModelFollowsAnimation;
+    }
+
+    /** 记录一个见过的界面，供配置界面提示用 */
+    public static void noteSeenScreen(String className) {
+        if (className == null || className.isEmpty()) {
+            return;
+        }
+        synchronized (SEEN_SCREENS) {
+            if (SEEN_SCREENS.size() >= MAX_SEEN_SCREENS && !SEEN_SCREENS.contains(className)) {
+                return;
+            }
+            SEEN_SCREENS.add(className);
+        }
+    }
+
+    /** 最近见过的界面（新的在后） */
+    public static java.util.List<String> seenScreens() {
+        synchronized (SEEN_SCREENS) {
+            return new java.util.ArrayList<>(SEEN_SCREENS);
+        }
+    }
+
     /** excludedScreens 与 extraScreens 一样按前缀匹配（写包名也能整包排除） */
     public static boolean isExcluded(String className) {
         Set<String> set = excludedSet;
@@ -519,7 +709,16 @@ public final class TransitionConfig {
     }
 
     public static synchronized void setDurationMs(int value) {
-        durationMs = clampDuration(value);
+        setDurationMsBoth(value);
+    }
+
+    public static synchronized void setOpenDurationMs(int value) {
+        openDurationMs = clampDuration(value);
+        save();
+    }
+
+    public static synchronized void setCloseDurationMs(int value) {
+        closeDurationMs = clampDuration(value);
         save();
     }
 
@@ -532,6 +731,10 @@ public final class TransitionConfig {
         Curve resolved = value == null ? Curve.CUBIC : value;
         curveId = resolved.id();
         curveCache = resolved;
+        openCurveId = resolved.id();
+        openCurveCache = resolved;
+        closeCurveId = resolved.id();
+        closeCurveCache = resolved;
         save();
     }
 
@@ -539,11 +742,48 @@ public final class TransitionConfig {
         setCurve(Curve.byId(value));
     }
 
+    public static synchronized void setOpenCurve(String value) {
+        setOpenCurveInternal(value);
+        save();
+    }
+
+    public static synchronized void setCloseCurve(String value) {
+        setCloseCurveInternal(value);
+        save();
+    }
+
+    public static synchronized void setCurveCustom(String value) {
+        setCurveCustomInternal(value);
+        save();
+    }
+
+    public static synchronized void setPlayerModelFollowsAnimation(boolean value) {
+        playerModelFollowsAnimation = value;
+        save();
+    }
+
     /** 只写字段不存盘：给 load() 用，避免"读配置"触发一次写盘 */
     private static void setCurveIdInternal(String value) {
         Curve resolved = Curve.byId(value);
         curveId = resolved.id();
         curveCache = resolved;
+    }
+
+    private static void setOpenCurveInternal(String value) {
+        Curve resolved = Curve.byId(value);
+        openCurveId = resolved.id();
+        openCurveCache = resolved;
+    }
+
+    private static void setCloseCurveInternal(String value) {
+        Curve resolved = Curve.byId(value);
+        closeCurveId = resolved.id();
+        closeCurveCache = resolved;
+    }
+
+    private static void setCurveCustomInternal(String value) {
+        curveCustom = isValidBezier(value) ? value : DEFAULT_CUSTOM_BEZIER;
+        customBezierCache = parseBezier(curveCustom);
     }
 
     public static synchronized void setFade(boolean value) {
@@ -727,12 +967,14 @@ public final class TransitionConfig {
 
     public static String describe() {
         return String.format(Locale.ROOT,
-                "enabled=%s duration=%dms offset=%.0fpx curve=%s jelly=%.0f%% "
+                "enabled=%s open=%dms/%s close=%dms/%s offset=%.0fpx jelly=%.0f%% "
                         + "fade=%s(fadeDim=%s items=%s text=%s) openFromBottom=%s closeToBottom=%s "
-                        + "allScreens=%s sameTypeSwitch=%s panel=%s dim=%s subtitles=%s",
-                enabled(), durationMs(), offset(), curve().id(), jelly() * 100.0F,
+                        + "allScreens=%s sameTypeSwitch=%s panel=%s dim=%s subtitles=%s "
+                        + "playerModelFollows=%s",
+                enabled(), openDurationMs(), openCurve().id(), closeDurationMs(), closeCurve().id(),
+                offset(), jelly() * 100.0F,
                 fade(), fadeDim(), fadeItems(), fadeText(),
                 openFromBottom(), closeToBottom(), animateAllScreens(), animateSameTypeSwitch(),
-                animatePanel(), animateDim(), animateSubtitles());
+                animatePanel(), animateDim(), animateSubtitles(), playerModelFollowsAnimation());
     }
 }

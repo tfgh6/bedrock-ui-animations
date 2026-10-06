@@ -150,9 +150,9 @@ public final class UiTransitions {
                     return true;                       // 已经在关闭中：继续拦着，不重启动画
                 }
                 // 打开动画还没播完就关闭：按当前可见透明度反解关闭曲线的进度，接着往下走
-                long closeDuration = durationNanos();
+                long closeDuration = closeDurationNanos();
                 long backdate = backdateNanos(
-                        solveProgress(TransitionConfig.curve(), visualAlpha(current), true), closeDuration);
+                        solveProgress(TransitionConfig.closeCurve(), visualAlpha(current), true), closeDuration);
                 CLOSING.put(current, new Close(now - backdate, closeDuration, null));
                 OPEN_START.remove(current);
                 FINISHED.remove(current);
@@ -171,11 +171,11 @@ public final class UiTransitions {
             }
             if (target != null && shouldAnimate(target)) {
                 // 之前正在关闭这个界面（重新打开）：同样按当前透明度接续
-                long openDuration = durationNanos();
+                long openDuration = openDurationNanos();
                 long backdate = 0L;
                 if (CLOSING.containsKey(target)) {
                     backdate = backdateNanos(
-                            solveProgress(TransitionConfig.curve(), visualAlpha(target), false), openDuration);
+                            solveProgress(TransitionConfig.openCurve(), visualAlpha(target), false), openDuration);
                     CLOSING.remove(target);
                 }
                 OPEN_START.put(target, new Open(now - backdate, openDuration));
@@ -653,7 +653,7 @@ public final class UiTransitions {
                 FRAME_ALPHA.set(1.0F);
                 return;
             }
-            float eased = TransitionConfig.curve().easeOut(progress);
+            float eased = TransitionConfig.openCurve().easeOut(progress);
             float base = slotFloorAlpha(screen, slotY);
             float alpha = base + (1.0F - base) * eased;
             WINDOW_ALPHA.set(alpha);
@@ -723,7 +723,7 @@ public final class UiTransitions {
                 TAB_SWITCH.remove(screen);
                 return;
             }
-            float eased = TransitionConfig.curve().easeOut(progress);
+            float eased = TransitionConfig.openCurve().easeOut(progress);
             // 标签切换 / 滚动只做淡变，**不做任何位移**。
             float alpha = TransitionConfig.fade() ? (FADE_FLOOR + (1.0F - FADE_FLOOR) * eased) : 1.0F;
             WINDOW_ALPHA.set(alpha);
@@ -804,16 +804,21 @@ public final class UiTransitions {
             if (!TransitionConfig.fade()) {
                 return;
             }
-            if (isPlayerPreview(state) && !HIDE_PREVIEW && PREVIEW_ALPHA_OVERRIDE >= 0.0F) {
+            // playerModelFollowsAnimation=true 时，玩家模型不搞特殊：
+            // 既不在打开时延迟淡入，也不在关闭时提前隐藏，而是和界面一起淡
+            boolean specialPlayerModel = isPlayerPreview(state)
+                    && !TransitionConfig.playerModelFollowsAnimation();
+            if (specialPlayerModel && !HIDE_PREVIEW && PREVIEW_ALPHA_OVERRIDE >= 0.0F) {
                 WINDOW_ALPHA.set(PREVIEW_ALPHA_OVERRIDE);
                 PIP_BLITTING.set(true);
                 return;
             }
-            if (TransitionConfig.hidePlayerModelOnClose() && isPlayerPreview(state) && HIDE_PREVIEW) {
+            if (specialPlayerModel && TransitionConfig.hidePlayerModelOnClose() && HIDE_PREVIEW) {
                 WINDOW_ALPHA.set(0.0F);      // 关闭动画一开始：玩家模型直接不画
                 PIP_BLITTING.set(true);
                 return;
             }
+            // 其余（书 / 地图 / 旗帜 / 玩家模型跟随模式）一律用本帧内容层的透明度
             WINDOW_ALPHA.set(PIP_FRAME_ALPHA);
             PIP_BLITTING.set(true);
         } catch (Throwable t) {
@@ -858,6 +863,7 @@ public final class UiTransitions {
                 return false;
             }
             String name = screen.getClass().getName();
+            TransitionConfig.noteSeenScreen(name);      // 记下来给配置界面做提示
             if (TransitionConfig.isExcluded(name)) {
                 return false;
             }
@@ -872,10 +878,18 @@ public final class UiTransitions {
         }
     }
 
+    /**
+     * 这一段动画该用哪条曲线：关闭中用渐出曲线，其余（打开、原地淡变）用渐入曲线。
+     * 曲线可以在配置里分开设，所以不能再统一读 TransitionConfig.curve()。
+     */
+    private static TransitionConfig.Curve curveFor(Screen screen) {
+        return CLOSING.containsKey(screen) ? TransitionConfig.closeCurve() : TransitionConfig.openCurve();
+    }
+
     /** 当前"可见透明度"（关闭中递减、打开中递增），用于打断时接续 */
     private static float visualAlpha(Screen screen) {
         float p = progress(screen);
-        TransitionConfig.Curve curve = TransitionConfig.curve();
+        TransitionConfig.Curve curve = curveFor(screen);
         return CLOSING.containsKey(screen) ? 1.0F - curve.easeIn(p) : curve.easeOut(p);
     }
 
@@ -929,7 +943,7 @@ public final class UiTransitions {
         }
         Open open = OPEN_START.get(screen);
         if (open == null) {
-            OPEN_START.put(screen, new Open(now, durationNanos()));
+            OPEN_START.put(screen, new Open(now, openDurationNanos()));
             return 0.0F;
         }
         return clamp01((now - open.startNanos()) / (float) open.durationNanos());
@@ -953,7 +967,7 @@ public final class UiTransitions {
     private static final float CONTENT_FADE_SPAN = 0.92F;
 
     private static float alpha(Screen screen, float progress, boolean contentLayer) {
-        TransitionConfig.Curve curve = TransitionConfig.curve();
+        TransitionConfig.Curve curve = curveFor(screen);
         if (CLOSING.containsKey(screen)) {
             float span = 1.0F;
             if (contentLayer && TransitionConfig.staggerClose()) {
@@ -972,7 +986,7 @@ public final class UiTransitions {
             return 0.0F;
         }
         float offset = TransitionConfig.offset();
-        TransitionConfig.Curve curve = TransitionConfig.curve();
+        TransitionConfig.Curve curve = curveFor(screen);
         if (CLOSING.containsKey(screen)) {
             float direction = TransitionConfig.closeToBottom() ? 1.0F : -1.0F;
             return direction * offset * curve.easeIn(progress);
@@ -993,19 +1007,36 @@ public final class UiTransitions {
     }
 
     /**
-     * 本段动画的时长（纳秒）。
+     * 渐入（打开）这一段动画的时长（纳秒）。
      *
      * 用 TransitionConfig 的上下限常量，而不是在这里另外写死一组数字 ——
      * 之前这里写的是 1..5000，而配置侧的合法范围是 50..2000，
      * 两套边界不一致，改配置范围时很容易忘掉这一处。
      */
-    private static long durationNanos() {
+    private static long openDurationNanos() {
+        return millisToNanos(TransitionConfig.openDurationMs(), durationFallback());
+    }
+
+    /** 渐出（关闭）这一段动画的时长（纳秒） */
+    private static long closeDurationNanos() {
+        return millisToNanos(TransitionConfig.closeDurationMs(), durationFallback());
+    }
+
+    private static int durationFallback() {
         try {
-            int millis = Math.max(TransitionConfig.MIN_DURATION_MS,
-                    Math.min(TransitionConfig.MAX_DURATION_MS, TransitionConfig.durationMs()));
-            return millis * 1_000_000L;
+            return TransitionConfig.DEFAULT_DURATION_MS;
         } catch (Throwable t) {
-            return (long) TransitionConfig.DEFAULT_DURATION_MS * 1_000_000L;
+            return 500;
+        }
+    }
+
+    private static long millisToNanos(int millis, int fallback) {
+        try {
+            int clamped = Math.max(TransitionConfig.MIN_DURATION_MS,
+                    Math.min(TransitionConfig.MAX_DURATION_MS, millis));
+            return clamped * 1_000_000L;
+        } catch (Throwable t) {
+            return (long) fallback * 1_000_000L;
         }
     }
 
@@ -1049,6 +1080,6 @@ public final class UiTransitions {
         }
         return "当前界面=" + (current == null ? "无" : current.getClass().getSimpleName())
                 + " 打开中=" + OPEN_START.size() + " 关闭中=" + CLOSING.size()
-                + " 曲线=" + TransitionConfig.curve().id();
+                + " 曲线=" + TransitionConfig.openCurve().id() + "/" + TransitionConfig.closeCurve().id();
     }
 }

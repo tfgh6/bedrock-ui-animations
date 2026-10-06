@@ -37,25 +37,59 @@ public final class UiTransitionsConfigScreen {
 
         // 用文本输入而不是下拉菜单：Cloth 的下拉菜单类会引入额外的注解依赖
         anim.addEntry(entries.startStrField(
-                        Component.literal("缓动曲线"), TransitionConfig.curve().id())
+                        Component.literal("缓动曲线（通用）"), TransitionConfig.curve().id())
                 .setDefaultValue(TransitionConfig.Curve.CUBIC.id())
-                .setErrorSupplier(value -> TransitionConfig.Curve.byId(value).id().equals(
-                        value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT))
-                        ? java.util.Optional.empty()
-                        : java.util.Optional.of(Component.literal(
-                                "可用值: " + String.join(" / ", TransitionConfig.Curve.ids()))))
+                .setErrorSupplier(UiTransitionsConfigScreen::curveError)
                 .setTooltip(Component.literal("影响动画手感，可选："),
                         Component.literal("linear 匀速 / sine 柔和 / cubic 默认 / quart、quint 更急"),
-                        Component.literal("/ expo 极快收尾 / circ 圆弧 / back 回拉一下再走"))
+                        Component.literal("/ expo 极快收尾 / circ 圆弧 / back 回拉一下再走"),
+                        Component.literal("/ custom 自定义（用下面的「自定义曲线参数」）"))
                 .setSaveConsumer(TransitionConfig::setCurveId)
                 .build());
 
-        anim.addEntry(entries.startIntSlider(Component.literal("动画时长（毫秒）"), TransitionConfig.durationMs(),
+        anim.addEntry(entries.startIntSlider(Component.literal("渐入时长（毫秒）"), TransitionConfig.openDurationMs(),
                         TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS)
                 .setDefaultValue(TransitionConfig.DEFAULT_DURATION_MS)
-                .setTooltip(Component.literal("滑入/滑出持续的时间，默认 500；太短会看起来像闪一下。"),
+                .setTooltip(Component.literal("打开界面时的动画时长，默认 500；太短会看起来像闪一下"),
                         Component.literal("觉得拖沓就往小调，觉得一闪而过就往大调"))
-                .setSaveConsumer(TransitionConfig::setDurationMs)
+                .setSaveConsumer(TransitionConfig::setOpenDurationMs)
+                .build());
+
+        anim.addEntry(entries.startIntSlider(Component.literal("渐出时长（毫秒）"), TransitionConfig.closeDurationMs(),
+                        TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS)
+                .setDefaultValue(TransitionConfig.DEFAULT_DURATION_MS)
+                .setTooltip(Component.literal("关闭界面时的动画时长，默认 500。"),
+                        Component.literal("很多人喜欢让关闭比打开更快一点，比如渐入 500 / 渐出 350"))
+                .setSaveConsumer(TransitionConfig::setCloseDurationMs)
+                .build());
+
+        anim.addEntry(entries.startStrField(
+                        Component.literal("渐入曲线（可单独设）"), TransitionConfig.openCurve().id())
+                .setDefaultValue(TransitionConfig.Curve.CUBIC.id())
+                .setErrorSupplier(UiTransitionsConfigScreen::curveError)
+                .setTooltip(Component.literal("打开界面时用的曲线；想和渐出不一样就改这里"))
+                .setSaveConsumer(TransitionConfig::setOpenCurve)
+                .build());
+
+        anim.addEntry(entries.startStrField(
+                        Component.literal("渐出曲线（可单独设）"), TransitionConfig.closeCurve().id())
+                .setDefaultValue(TransitionConfig.Curve.CUBIC.id())
+                .setErrorSupplier(UiTransitionsConfigScreen::curveError)
+                .setTooltip(Component.literal("关闭界面时用的曲线；想和渐入不一样就改这里"))
+                .setSaveConsumer(TransitionConfig::setCloseCurve)
+                .build());
+
+        anim.addEntry(entries.startStrField(
+                        Component.literal("自定义曲线参数"), TransitionConfig.curveCustom())
+                .setDefaultValue(TransitionConfig.DEFAULT_CUSTOM_BEZIER)
+                .setErrorSupplier(value -> TransitionConfig.isValidBezier(value)
+                        ? java.util.Optional.empty()
+                        : java.util.Optional.of(Component.literal("格式：x1,y1,x2,y2（四个数字，逗号分隔）")))
+                .setTooltip(Component.literal("把上面任意一条曲线写成 custom 就会用这四个数。"),
+                        Component.literal("和 CSS 的 cubic-bezier(x1,y1,x2,y2) 是同一套："),
+                        Component.literal("0.25,0.1,0.25,1 ≈ 默认手感；0,0,1,1 = 匀速；"),
+                        Component.literal("0.34,1.56,0.64,1 = 带一点回弹；y 可以超过 1 做过冲"))
+                .setSaveConsumer(TransitionConfig::setCurveCustom)
                 .build());
 
         anim.addEntry(entries.startIntSlider(Component.literal("位移距离（像素）"), Math.round(TransitionConfig.offset()), 0, 400)
@@ -107,6 +141,15 @@ public final class UiTransitionsConfigScreen {
         ConfigCategory layers = builder.getOrCreateCategory(Component.literal("参与动画的部分"));
 
         layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("玩家模型跟随界面动画"), TransitionConfig.playerModelFollowsAnimation())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("打开（默认）：背包里的小模型和界面一起淡，不搞特殊。"),
+                        Component.literal("关掉：恢复旧行为 —— 打开时延迟一会儿才浮现、关闭时立刻消失。"),
+                        Component.literal("（附魔台的附魔书、地图、旗帜预览一直都是跟随动画的）"))
+                .setSaveConsumer(TransitionConfig::setPlayerModelFollowsAnimation)
+                .build());
+
+        layers.addEntry(entries.startBooleanToggle(
                         Component.literal("关闭时内容提前淡出"), TransitionConfig.staggerClose())
                 .setDefaultValue(true)
                 .setTooltip(Component.literal("关闭动画里物品与文字比底板略早结束淡出，避免出现空格子"))
@@ -116,7 +159,8 @@ public final class UiTransitionsConfigScreen {
         layers.addEntry(entries.startIntSlider(Component.literal("玩家模型延迟淡入（%）"),
                         TransitionConfig.previewFadeDelay(), 0, 100)
                 .setDefaultValue(35)
-                .setTooltip(Component.literal("打开界面时玩家模型等待多久才开始淡入（占动画时长百分比）"))
+                .setTooltip(Component.literal("仅在关掉「玩家模型跟随界面动画」时才有意义："),
+                        Component.literal("打开界面时玩家模型等待多久才开始淡入（占动画时长百分比）"))
                 .setSaveConsumer(TransitionConfig::setPreviewFadeDelay)
                 .build());
 
@@ -207,13 +251,14 @@ public final class UiTransitionsConfigScreen {
                 .setSaveConsumer(TransitionConfig::setAnimateSameTypeSwitch)
                 .build());
 
-        layers.addEntry(entries.startStrField(
-                        Component.literal("额外适配的界面（类名或包名，逗号分隔）"),
-                        TransitionConfig.extraScreens())
-                .setDefaultValue(TransitionConfig.DEFAULT_EXTRA_SCREENS)
+        layers.addEntry(entries.startStrList(
+                        Component.literal("额外适配的界面（列表）"),
+                        splitScreens(TransitionConfig.extraScreens()))
+                .setDefaultValue(splitScreens(TransitionConfig.DEFAULT_EXTRA_SCREENS))
+                .setExpanded(true)
                 .setTooltip(Component.literal("这些界面即使不是容器界面也会有过渡动画，按前缀匹配。"),
-                        Component.literal("默认已含 JEI / EMI / REI 的物品管理器界面"))
-                .setSaveConsumer(TransitionConfig::setExtraScreens)
+                        Component.literal("点 + 添加一行，填类名或包名；默认已含 JEI / EMI / REI"))
+                .setSaveConsumer(list -> TransitionConfig.setExtraScreens(joinScreens(list)))
                 .build());
 
         // ============================================================ 方向
@@ -241,22 +286,101 @@ public final class UiTransitionsConfigScreen {
                 })
                 .build());
 
+        // ============================================================ 界面开关
+        ConfigCategory perScreen = builder.getOrCreateCategory(Component.literal("界面开关"));
+
+        perScreen.addEntry(entries.startStrList(
+                        Component.literal("不做动画的界面（列表）"),
+                        splitScreens(TransitionConfig.excludedScreens()))
+                .setDefaultValue(java.util.Collections.emptyList())
+                .setExpanded(true)
+                .setTooltip(Component.literal("想让哪个界面恢复成原版，就在这里加一行它的类名或包名。"),
+                        Component.literal("按前缀匹配：写 com.example 就能整包关掉，"),
+                        Component.literal("写完整类名就只关那一个界面。"),
+                        Component.literal("下面列出了最近见过的界面类名，照着填即可。"))
+                .setSaveConsumer(list -> TransitionConfig.setExcludedScreens(joinScreens(list)))
+                .build());
+
+        perScreen.addEntry(entries.startTextDescription(
+                Component.literal("最近见过的界面（可直接复制到上面）：\n"
+                        + seenScreenHint())).build());
+
+        perScreen.addEntry(entries.startTextDescription(Component.literal(
+                "提示：只有装了动画的界面才会出现在这个列表里；"
+                        + "打开过某个界面之后回到这里，它就会被记下来。")).build());
+
         // ============================================================ 兼容性
         ConfigCategory compat = builder.getOrCreateCategory(Component.literal("兼容性"));
-
-        compat.addEntry(entries.startStrField(
-                        Component.literal("排除的界面（类名或包名，逗号分隔）"),
-                        TransitionConfig.excludedScreens())
-                .setDefaultValue("")
-                .setTooltip(Component.literal("某个界面表现异常时可以把它排除，按前缀匹配。"),
-                        Component.literal("可以写完整类名 com.example.FooScreen，也可以只写包名 com.example"))
-                .setSaveConsumer(TransitionConfig::setExcludedScreens)
-                .build());
 
         compat.addEntry(entries.startTextDescription(Component.literal(
                         "提示：所有选项都会写入 config/ui-transitions.properties，改动立刻保存。"))
                 .build());
 
         return builder.build();
+    }
+
+    /** 曲线文本框的校验：值必须是已知曲线 id */
+    private static java.util.Optional<Component> curveError(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (TransitionConfig.Curve.byId(value).id().equals(normalized)) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(Component.literal(
+                "可用值: " + String.join(" / ", TransitionConfig.Curve.ids())));
+    }
+
+    /** "a,b,c" -> ["a","b","c"]（配置文件里是逗号分隔的字符串，界面用列表更好操作） */
+    private static java.util.List<String> splitScreens(String value) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (value != null) {
+            for (String part : value.split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) {
+                    out.add(trimmed);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** ["a","b"] -> "a,b" */
+    private static String joinScreens(java.util.List<String> list) {
+        if (list == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String item : list) {
+            String trimmed = item == null ? "" : item.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(trimmed);
+        }
+        return sb.toString();
+    }
+
+    /** 把运行期记录下来的界面类名拼成一段提示文字 */
+    private static String seenScreenHint() {
+        java.util.List<String> seen = TransitionConfig.seenScreens();
+        if (seen.isEmpty()) {
+            return "（还没记录到：先打开几个界面，再回来这里）";
+        }
+        StringBuilder sb = new StringBuilder();
+        int shown = 0;
+        for (String name : seen) {
+            if (shown >= 14) {
+                sb.append("… 共 ").append(seen.size()).append(" 个");
+                break;
+            }
+            if (shown > 0) {
+                sb.append('\n');
+            }
+            sb.append(name);
+            shown++;
+        }
+        return sb.toString();
     }
 }
