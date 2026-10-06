@@ -344,7 +344,17 @@ public final class UiTransitions {
             if (PUSHED_SCREEN.get() == screen) {
                 extractor.pose().popMatrix();
                 PUSHED_SCREEN.remove();
-                WINDOW_ALPHA.set(1.0F);
+                // 这里**故意不复位 WINDOW_ALPHA**。
+                //
+                // extractRenderStateWithTooltipAndSubtitles 的顺序是：
+                //   extractBackground -> extractRenderState -> extractDeferredElements
+                // 最后那步画的是物品提示框（那条深色文字框）。之前在这里把透明度复位成 1，
+                // 于是界面在淡出、提示框却还全不透明地杵在那儿，一直到动画播完才消失
+                // （用户反馈的"动画没做完时有个文字框一直留着"就是它）。
+                //
+                // 留在内容层的透明度上，提示框就会跟着界面一起淡；
+                // 复位交给 endScreenFrame —— 那时整个界面已经画完，不会漏到 HUD。
+                WINDOW_ALPHA.set(LAYER_ALPHA.get());
                 if (progress(screen) >= 1.0F && !CLOSING.containsKey(screen)) {
                     OPEN_START.remove(screen);
                     FINISHED.add(screen);
@@ -797,10 +807,6 @@ public final class UiTransitions {
         } catch (Throwable t) {
             report("endScreenFrame", t);
         }
-    }
-
-    public static boolean isClosing(Screen screen) {
-        return CLOSING.containsKey(screen);
     }
 
     /**
@@ -1342,20 +1348,5 @@ public final class UiTransitions {
      *                        +1 / -1 = 滚轮或拖动方向（逐格渐变，进入边随之切换）
      */
     private record TabSwitch(long startNanos, float scrollDirection) {
-    }
-
-    public static String status() {
-        Screen current = null;
-        try {
-            Minecraft minecraft = Minecraft.getInstance();
-            if (minecraft != null && minecraft.gui != null) {
-                current = minecraft.gui.screen();
-            }
-        } catch (Throwable ignored) {
-            // 忽略
-        }
-        return "当前界面=" + (current == null ? "无" : current.getClass().getSimpleName())
-                + " 打开中=" + OPEN_START.size() + " 关闭中=" + CLOSING.size()
-                + " 曲线=" + TransitionConfig.openCurve().id() + "/" + TransitionConfig.closeCurve().id();
     }
 }

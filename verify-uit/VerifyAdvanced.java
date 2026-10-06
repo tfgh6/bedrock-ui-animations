@@ -22,7 +22,7 @@ public class VerifyAdvanced {
 
         TransitionConfig.ensureLoaded();
         TransitionConfig.resetToDefaults();
-        TransitionConfig.setDurationMs(2000);
+        TransitionConfig.setDurationMsBoth(2000);
 
         // ---------- 1) JEI 一类界面适配 ----------
         check("普通界面默认不参与", !UiTransitions.shouldAnimate(plain), "false");
@@ -95,7 +95,7 @@ public class VerifyAdvanced {
         check("字幕之后位移被复原", Math.abs(restored - shiftBeforeSubtitle) < 0.01F, "复原=" + restored);
 
         // ---------- 5) 打断动画接续 ----------
-        TransitionConfig.setDurationMs(2000);
+        TransitionConfig.setDurationMsBoth(2000);
         openPanel(gui, container);
         UiTransitions.beginContentLayer(container, extractor);   // 开始打开动画
         Thread.sleep(700);                                      // 打开到约 1/3
@@ -153,7 +153,7 @@ public class VerifyAdvanced {
         // 先切到一个不同类的界面，避免触发"同类界面直接切换"而让下面这个界面不做动画
         gui.setScreen(new Screen());
         Screen tail = new EmptyContainer();
-        TransitionConfig.setDurationMs(2000);
+        TransitionConfig.setDurationMsBoth(2000);
         openPanel(gui, tail);
         UiTransitions.beginContentLayer(tail, extractor);   // 启动打开动画
         UiTransitions.endContentLayer(tail, extractor);
@@ -171,6 +171,10 @@ public class VerifyAdvanced {
 
         // 非动画帧必须回到完全不透明，否则物品会被残留值错误淡出。
         // 用"同类界面切换被跳过"来构造一个确实不做动画的界面。
+        //
+        // 先补一次 endScreenFrame：复位的时机从"内容层结束"挪到了"整帧结束"，
+        // 因为内容层之后紧接着要画物品提示框，它也得跟着界面一起淡（见下面的专项断言）。
+        UiTransitions.endScreenFrame();
         gui.setScreen(new EmptyContainer());
         Screen idle = new EmptyContainer();
         UiTransitions.interceptSetScreen(gui, idle);
@@ -188,6 +192,28 @@ public class VerifyAdvanced {
                 idleFallback == 255 && idleFrame == 255 && idlePush == 0,
                 "层内=" + idleFrame + " 兜底=" + idleFallback + " push=" + idlePush);
 
+        // ---------- 8a-2) 物品提示框必须跟着界面一起淡 ----------
+        // extractRenderStateWithTooltipAndSubtitles 的顺序是
+        //   extractBackground -> extractRenderState -> extractDeferredElements
+        // 提示框在最后那步画。如果 endContentLayer 在这里就把透明度复位，
+        // 界面在淡出、提示框却全不透明地杵着不动 —— 用户反馈的"动画没做完时
+        // 有个文字框一直留着"就是这个。这里把两种时机都钉住。
+        TransitionConfig.setDurationMsBoth(2000);
+        gui.setScreen(new Screen());
+        Screen tooltipHost = new EmptyContainer();
+        openPanel(gui, tooltipHost);
+        UiTransitions.beginContentLayer(tooltipHost, extractor);
+        UiTransitions.endContentLayer(tooltipHost, extractor);
+        Thread.sleep(600);
+        UiTransitions.beginContentLayer(tooltipHost, extractor);
+        UiTransitions.endContentLayer(tooltipHost, extractor);
+        int deferredAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        check("内容层结束后透明度**保持**在动画值（提示框才会跟着淡）",
+                deferredAlpha > 0 && deferredAlpha < 255, "alpha=" + deferredAlpha);
+        UiTransitions.endScreenFrame();
+        int afterFrameAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        check("整帧结束后透明度复位（不会漏到 HUD）", afterFrameAlpha == 255, "alpha=" + afterFrameAlpha);
+
         // ---------- 8b) 关闭时分两段消失：内容先没、底板最后 ----------
         TransitionConfig.setStaggerClose(true);
         TransitionConfig.setAnimatePanel(true);
@@ -197,12 +223,12 @@ public class VerifyAdvanced {
         // 若在打开到一半时就关闭，"打断接续"会把关闭进度回拨到与当前可见透明度一致的位置；
         // 而此刻面板几乎是全透明的，于是关闭会被判定为"已经结束"、瞬间完成 ——
         // 那是正确行为，但那样就测不到关闭中段了。
-        TransitionConfig.setDurationMs(200);
+        TransitionConfig.setDurationMsBoth(200);
         openPanel(gui, closing);
         UiTransitions.beginContentLayer(closing, extractor);
         UiTransitions.endContentLayer(closing, extractor);
         Thread.sleep(350);                                    // 等打开动画结束并标记为已就位
-        TransitionConfig.setDurationMs(2000);
+        TransitionConfig.setDurationMsBoth(2000);
         UiTransitions.interceptSetScreen(gui, null);          // 触发关闭
         Thread.sleep(1500);                                   // 约 75% 处
         UiTransitions.beginBackgroundLayer(closing, extractor);
@@ -231,7 +257,7 @@ public class VerifyAdvanced {
         TransitionConfig.setOverlayModsFadeOnly(true);
         gui.setScreen(new Screen());
         Screen overlayHost = new EmptyContainer();
-        TransitionConfig.setDurationMs(2000);
+        TransitionConfig.setDurationMsBoth(2000);
         openPanel(gui, overlayHost);
         Matrix3x2fStack.reset();
         UiTransitions.beginContentLayer(overlayHost, extractor);
@@ -270,7 +296,7 @@ public class VerifyAdvanced {
         TransitionConfig.setScrollFadeMin(0);
         // 打开动画故意设得极短：这样下面测的时候界面早已静止，
         // 从而验证"逐格淡变不依赖打开/关闭动画"—— 真机上点标签时正是这个状态。
-        TransitionConfig.setDurationMs(150);
+        TransitionConfig.setDurationMsBoth(150);
 
         gui.setScreen(new Screen());
         Screen creative = new EmptyContainer();
@@ -411,9 +437,9 @@ public class VerifyAdvanced {
                 midClose > 0 && midClose < 255, "alpha=" + midClose);
 
         // 自定义曲线：同一时刻的缓动结果必须随参数变化
-        TransitionConfig.setCurveCustom("0,0,1,1");          // 与线性等价
+        TransitionConfig.setOpenCurveCustom("0,0,1,1");          // 与线性等价
         float linearLike = customEaseOut(0.5F);
-        TransitionConfig.setCurveCustom("0.34,1.56,0.64,1"); // 带回弹
+        TransitionConfig.setOpenCurveCustom("0.34,1.56,0.64,1"); // 带回弹
         float bouncy = customEaseOut(0.5F);
         check("自定义曲线参数会实际改变缓动结果",
                 Math.abs(linearLike - bouncy) > 0.05F,
@@ -564,7 +590,7 @@ public class VerifyAdvanced {
     private static float curveValue(Screen screen, Gui gui, GuiGraphicsExtractor extractor,
                                     String curveId) throws Exception {
         TransitionConfig.setCurveId(curveId);
-        TransitionConfig.setDurationMs(2000);
+        TransitionConfig.setDurationMsBoth(2000);
         Screen fresh = new EmptyContainer();
         openPanel(gui, fresh);
         UiTransitions.beginContentLayer(fresh, extractor);
@@ -582,7 +608,7 @@ public class VerifyAdvanced {
     private static float openShiftAtPeak(Screen unused, Gui gui, GuiGraphicsExtractor extractor)
             throws Exception {
         Screen fresh = new EmptyContainer();
-        TransitionConfig.setDurationMs(1200);
+        TransitionConfig.setDurationMsBoth(1200);
         openPanel(gui, fresh);
         float min = Float.MAX_VALUE;
         long deadline = System.currentTimeMillis() + 1600L;

@@ -118,12 +118,9 @@ public final class TransitionConfig {
     private static volatile String closeCurveId = "cubic";
     private static volatile Curve openCurveCache = Curve.CUBIC;
     private static volatile Curve closeCurveCache = Curve.CUBIC;
-    /** 自定义曲线的控制点（原始字符串 + 解析结果），渐入渐出各一份 */    private static volatile String openCurveCustom = DEFAULT_CUSTOM_BEZIER;
+    /** 自定义曲线的控制点：渐入、渐出各一份 */
+    private static volatile String openCurveCustom = DEFAULT_CUSTOM_BEZIER;
     private static volatile String closeCurveCustom = DEFAULT_CUSTOM_BEZIER;
-    /** 兼容旧配置：老版本只有一个 curveCustom */
-    private static volatile String curveCustom = DEFAULT_CUSTOM_BEZIER;
-    private static volatile float[] customBezierCache = parseBezier(DEFAULT_CUSTOM_BEZIER);
-    /** 玩家模型（布娃娃）是否完全跟随界面动画 */
 
     /** 运行期见过的界面类名（供配置界面提示用），有上限，避免无限增长 */
     private static final java.util.LinkedHashSet<String> SEEN_SCREENS = new java.util.LinkedHashSet<>();
@@ -185,10 +182,6 @@ public final class TransitionConfig {
 
         public String id() {
             return this.id;
-        }
-
-        public boolean isCustom() {
-            return this.kind == KIND_CUSTOM;
         }
 
         /** 自定义曲线的控制点；命名曲线返回 null */
@@ -300,11 +293,6 @@ public final class TransitionConfig {
             ids[BUILT_IN.length] = CUSTOM_ID;
             return ids;
         }
-
-        /** 命名曲线（不含 custom） */
-        public static Curve[] builtIn() {
-            return BUILT_IN.clone();
-        }
     }
 
     // ================================================================== 读写
@@ -397,8 +385,9 @@ public final class TransitionConfig {
         setCurveIdInternal(legacyCurve);
         // 老配置只有一个 curveCustom，迁移时同时套给渐入与渐出
         String legacyCustom = properties.getProperty("curveCustom", DEFAULT_CUSTOM_BEZIER);
-        curveCustom = isValidBezier(legacyCustom) ? legacyCustom : DEFAULT_CUSTOM_BEZIER;
-        customBezierCache = parseBezier(curveCustom);
+        if (!isValidBezier(legacyCustom)) {
+            legacyCustom = DEFAULT_CUSTOM_BEZIER;
+        }
         setOpenCurveCustomInternal(properties.getProperty("openCurveCustom", legacyCustom));
         setCloseCurveCustomInternal(properties.getProperty("closeCurveCustom", legacyCustom));
         rebuildSets();
@@ -512,8 +501,6 @@ public final class TransitionConfig {
         openCurveCache = Curve.CUBIC;
         closeCurveId = Curve.CUBIC.id();
         closeCurveCache = Curve.CUBIC;
-        curveCustom = DEFAULT_CUSTOM_BEZIER;
-        customBezierCache = parseBezier(DEFAULT_CUSTOM_BEZIER);
         openCurveCustom = DEFAULT_CUSTOM_BEZIER;
         closeCurveCustom = DEFAULT_CUSTOM_BEZIER;
 
@@ -682,14 +669,6 @@ public final class TransitionConfig {
     }
 
     /** 自定义曲线的控制点 x1,y1,x2,y2（已经校验并夹紧） */
-    public static float[] customBezier() {
-        return customBezierCache;
-    }
-
-    public static String curveCustom() {
-        return curveCustom;
-    }
-
     /** 校验并解析 "x1,y1,x2,y2"；非法输入回退到默认值 */
     public static float[] parseBezier(String value) {
         if (value != null) {
@@ -816,10 +795,6 @@ public final class TransitionConfig {
         save();
     }
 
-    public static synchronized void setDurationMs(int value) {
-        setDurationMsBoth(value);
-    }
-
     public static synchronized void setOpenDurationMs(int value) {
         openDurationMs = clampDuration(value);
         save();
@@ -862,14 +837,6 @@ public final class TransitionConfig {
         save();
     }
 
-    /** 通用自定义参数：同时套给渐入与渐出（单独调请用另外两个 setter） */
-    public static synchronized void setCurveCustom(String value) {
-        setCurveCustomInternal(value);
-        setOpenCurveCustomInternal(curveCustom);
-        setCloseCurveCustomInternal(curveCustom);
-        save();
-    }
-
     /** 设置渐入的自定义控制点，并把渐入切到 custom */
     public static synchronized void setOpenCurveCustom(String value) {
         setOpenCurveCustomInternal(value);
@@ -903,11 +870,6 @@ public final class TransitionConfig {
     private static void setCloseCurveInternal(String value) {
         closeCurveId = Curve.byId(value).id();
         closeCurveCache = resolveCurve(closeCurveId, closeCurveCustom);
-    }
-
-    private static void setCurveCustomInternal(String value) {
-        curveCustom = isValidBezier(value) ? value : DEFAULT_CUSTOM_BEZIER;
-        customBezierCache = parseBezier(curveCustom);
     }
 
     /** 只刷新自定义控制点（渐入渐出各一份） */

@@ -31,7 +31,8 @@ public final class UiTransitionsNeoForge {
         boolean clothPresent = ModList.get().isLoaded(DependencyCheck.CLOTH_ID_NEOFORGE)
                 || ModList.get().isLoaded(DependencyCheck.CLOTH_ID_FABRIC);
         if (!clothPresent) {
-            DependencyCheck.failMissingCloth("NeoForge");
+            DependencyCheck.failMissing("NeoForge", DependencyCheck.CLOTH_NAME,
+                    DependencyCheck.CLOTH_IDS, DependencyCheck.CLOTH_URL);
         }
         System.out.println("[Bedrock UI Animations] NeoForge 入口：已检测到 Cloth Config");
 

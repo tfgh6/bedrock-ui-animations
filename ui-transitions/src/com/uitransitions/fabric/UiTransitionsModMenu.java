@@ -28,9 +28,4 @@ public final class UiTransitionsModMenu implements ModMenuApi {
             return null;
         }
     }
-
-    /** 供测试驱动调用（避免测试代码硬依赖 Cloth Config） */
-    public static Screen createConfigScreen(Screen parent) {
-        return UiTransitionsConfigScreen.create(parent);
-    }
 }

@@ -33,7 +33,7 @@ public class VerifyTransitions {
         // 断言里的等待时长依赖动画时长，所以这里显式钉死它，
         // 免得以后调整默认值（比如 300 -> 500）把断言弄成偶发失败。
         final int DURATION_MS = 300;
-        TransitionConfig.setDurationMs(DURATION_MS);
+        TransitionConfig.setDurationMsBoth(DURATION_MS);
         final long WAIT_MS = DURATION_MS + 150L;        // 留够余量等动画播完
 
         // ---------- 2) 只对容器界面生效 ----------
@@ -64,6 +64,9 @@ public class VerifyTransitions {
         UiTransitions.beginContentLayer(container, extractor);
         check("动画播完后不再压栈（闲置零开销）", Matrix3x2fStack.pushCount == 0,
                 "pushCount=" + Matrix3x2fStack.pushCount);
+        // 复位时机在"整帧结束"——内容层之后紧接着还要画物品提示框，它也得跟着界面一起淡，
+        // 所以先补一次 endScreenFrame 模拟上一帧的收尾
+        UiTransitions.endScreenFrame();
         check("动画播完后透明度恢复", (UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24) == 255, "alpha=255");
         UiTransitions.endContentLayer(container, extractor);
 

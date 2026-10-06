@@ -125,7 +125,8 @@ excludedScreens=              # 不做动画的界面（按前缀匹配，可写
 ## 兼容性
 
 - Minecraft **26.3**，Fabric Loader ≥ 0.16，NeoForge 26.3
-- **必需前置：Cloth Config**（配置界面由它提供；缺了会在启动时直接报错说明原因）
+- **必需前置**：**Cloth Config**（配置界面由它提供）；Fabric 上还需要 **Mod Menu**（配置按钮由它提供）
+  缺任何一个都会在启动时直接报错，并在崩溃信息里写明缺什么、去哪装
 - **纯客户端**；不改动存档，也不影响服务端
 - 与 **Sodium / Iris / Mod Menu / Cloth Config / JEI / EMI / REI** 共存
 - 与本仓库之外的同名模组**无任何代码关系**，是独立实现；两者不要同时安装
