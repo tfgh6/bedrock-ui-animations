@@ -508,25 +508,39 @@ public class VerifyAdvanced {
                 "渐入=" + TransitionConfig.openCurve().easeOut(0.5F)
                         + " 渐出=" + TransitionConfig.closeCurve().easeOut(0.5F));
 
-        // ---------- 13) 跨维度加载界面：必须被放行，且用更长的、只淡变的过渡 ----------
+        // ---------- 13) 跨维度加载界面：不参与常规动画，改由全屏遮罩负责 ----------
+        // 真实日志显示 26.3 换维度时会反复创建/销毁 LevelLoadingScreen（连着十几次、每次不到一秒），
+        // 包一层必然与它打架 —— 所以这个界面**故意**不做常规动画，交给遮罩。
         Screen portal = new net.minecraft.client.gui.screens.LevelLoadingScreen(
                 net.minecraft.client.gui.screens.LevelLoadingScreen.Reason.NETHER_PORTAL);
-        check("跨维度加载界面会被放行动画（它不是容器界面）",
-                UiTransitions.shouldAnimate(portal), "shouldAnimate=false");
+        check("跨维度加载界面不参与常规动画（避免与反复创建销毁打架）",
+                !UiTransitions.shouldAnimate(portal), "shouldAnimate=true");
 
-        TransitionConfig.setDurationMsBoth(300);
         TransitionConfig.setPortalDurationMs(3000);
-        gui.setScreen(new Screen());
-        UiTransitions.interceptSetScreen(gui, portal);
-        gui.setScreen(portal);
-        Thread.sleep(800);                                  // 远超普通 300ms，但远不到 3000ms
-        UiTransitions.beginContentLayer(portal, extractor);
-        int portalAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
-        UiTransitions.endContentLayer(portal, extractor);
-        check("800ms 时加载界面仍在淡入（说明用的是 portalDurationMs 而不是普通时长）",
-                portalAlpha > 0 && portalAlpha < 255, "alpha=" + portalAlpha);
-        check("加载界面默认只淡变不位移", TransitionConfig.portalFadeOnly(),
-                "portalFadeOnly=false");
+        UiTransitions.startPortalVeil(portal);
+        extractor.lastFillColor = 0;
+        UiTransitions.drawPortalVeil(extractor);
+        int veilFull = extractor.lastFillColor >>> 24;
+        // 不要求正好 255：从 startPortalVeil 到这次绘制之间总会过去几微秒，
+        // 取整后是 254 而不是 255。只要"几乎全黑"就说明起手是对的。
+        check("刚跨维度时遮罩几乎是全黑的（界面从黑里缓缓切入）",
+                veilFull >= 250, "alpha=" + veilFull);
+
+        Thread.sleep(1200);
+        extractor.lastFillColor = 0;
+        UiTransitions.drawPortalVeil(extractor);
+        int veilMid = extractor.lastFillColor >>> 24;
+        check("1.2 秒后遮罩已淡开一部分（逐渐变为透明）",
+                veilMid > 0 && veilMid < 255, "alpha=" + veilMid);
+
+        Thread.sleep(2600);
+        extractor.lastFillColor = 0;
+        UiTransitions.drawPortalVeil(extractor);
+        int veilEnd = extractor.lastFillColor >>> 24;
+        check("淡出结束后遮罩完全透明（画面交还给世界）", veilEnd == 0, "alpha=" + veilEnd);
+
+        check("关掉「只淡入淡出」就不画遮罩",
+                TransitionConfig.portalFadeOnly(), "portalFadeOnly=false");
 
         TransitionConfig.resetToDefaults();
         System.out.println();

@@ -142,10 +142,16 @@ public final class UiTransitions {
             long now = System.nanoTime();
             Screen current = gui.screen();
             // 每一次切屏都记一行：排查"某个界面怎么没效果"时，这是唯一能直接看出
-            // "到底有没有走到这里、有没有被判成要做动画"的地方
-            log("切屏: " + (current == null ? "(无)" : current.getClass().getSimpleName())
-                    + " -> " + (target == null ? "(无)" : target.getClass().getSimpleName())
-                    + (target != null && isPortalLoading(target) ? "【跨维度加载界面】" : ""));
+            // "到底有没有走到这里、有没有被判成要做动画"的地方。
+            //
+            // 但要按"内容变了才记"去重：关闭动画期间游戏会**反复**调 setScreen(null)，
+            // 原样记下来就是几十行一模一样的 "A -> (无)"，把日志淹掉（真实日志里见过）。
+            logScreenChange(current, target);
+            // 跨维度加载界面出现或消失 -> 拉满遮罩（它自己会缓缓淡出）。
+            // 放在常规动画判定之前：这个界面**不参与**常规动画，见 shouldAnimate。
+            if (isPortalLoading(current) || isPortalLoading(target)) {
+                startPortalVeil(target != null ? target : current);
+            }
             // 同类界面之间的"换页"（创造模式分类标签、配方书翻页等）直接切换，不做动画：
             // 它们本来就是同一个界面的内部操作，滑入滑出会很突兀。
             if (target != null && current != null && target != current
@@ -871,12 +877,17 @@ public final class UiTransitions {
                 noteSkip(screen, "在排除列表里");
                 return false;
             }
+            // 跨维度加载界面**不参与常规动画**：26.3 在换维度期间会反复创建/销毁它
+            // （真实日志里连着十几次），包一层必然与它打架。它由专门的全屏遮罩负责，
+            // 效果稳定得多 —— 见 startPortalVeil。
+            if (isPortalLoading(screen)) {
+                return false;
+            }
             if (TransitionConfig.animateAllScreens()) {
                 return true;
             }
-            // 跨维度加载界面单独放行：它不是容器界面，但用户希望穿传送门时有过渡
-            // （只淡变、且更长，见 offsetFor 与时长）
-            if (isPortalLoading(screen)) {
+            // 其它加载/等待类界面（存档进度之类）没有这个问题，正常放行
+            if (isWaitingScreen(screen)) {
                 return true;
             }
             if (screen instanceof AbstractContainerScreen<?> || TransitionConfig.isExtraScreen(name)) {
@@ -915,6 +926,98 @@ public final class UiTransitions {
     /** 统一前缀，方便在 logs/latest.log 里搜 */
     private static void log(String message) {
         System.out.println("[UI Transitions] " + message);
+    }
+
+    /** 上一次真正记过的切屏内容，用来去重 */
+    private static volatile String lastScreenChange = "";
+
+    // ================================================================== 跨维度过渡遮罩
+
+    /**
+     * 跨维度（末地门 / 地狱门）时的过渡，用一层**全屏遮罩**来做，而不是包装那个界面。
+     *
+     * 为什么不包装界面：真实日志显示 26.3 在换维度期间会**反复创建/销毁**
+     * LevelLoadingScreen（"切屏: (无) -> LevelLoadingScreen" 连着出现十几次，
+     * 每次在屏不到一秒）。淡入还没走完界面就被撤掉、紧接着又新建一个 ——
+     * 淡入淡出互相叠加，界面永远到不了全不透明，观感上就是"完全没效果"。
+     *
+     * 遮罩是独立于界面生命周期的：换维度期间一直保持全黑，等这阵子过去再缓缓淡出，
+     * 于是"进去时缓缓切入、出来时缓缓切出、逐渐变为透明"这两件事都能稳定做到。
+     */
+    private static volatile long veilStartNanos;
+    private static volatile long veilDurationNanos;
+    private static volatile boolean veilActive;
+
+    /** 在跨维度加载界面出现/消失时调用：把遮罩拉满，然后交给它自己淡出 */
+    public static void startPortalVeil(Screen screen) {
+        try {
+            if (!TransitionConfig.enabled()) {
+                return;
+            }
+            veilStartNanos = System.nanoTime();
+            veilDurationNanos = millisToNanos(TransitionConfig.portalDurationMs(), durationFallback());
+            if (!veilActive) {
+                log("跨维度过渡遮罩启动: " + (screen == null ? "(无)"
+                        : screen.getClass().getSimpleName() + " reason=" + portalReason(screen))
+                        + " 淡出时长=" + (veilDurationNanos / 1_000_000L) + "ms");
+            }
+            veilActive = true;
+        } catch (Throwable t) {
+            report("startPortalVeil", t);
+        }
+    }
+
+    /** 1 = 全黑，0 = 完全透明 */
+    private static float veilAlpha() {
+        if (!veilActive) {
+            return 0.0F;
+        }
+        long elapsed = System.nanoTime() - veilStartNanos;
+        if (elapsed >= veilDurationNanos) {
+            veilActive = false;
+            return 0.0F;
+        }
+        float p = elapsed / (float) veilDurationNanos;
+        // 从全黑缓缓退到透明，用渐入曲线，手感与其它动画一致
+        return 1.0F - TransitionConfig.openCurve().easeOut(p);
+    }
+
+    /** 画遮罩。界面存在时由 Screen 的收尾注入调用，没有界面时由 HUD 注入调用。 */
+    public static void drawPortalVeil(GuiGraphicsExtractor extractor) {
+        try {
+            if (!TransitionConfig.enabled() || !TransitionConfig.portalFadeOnly()) {
+                return;
+            }
+            float alpha = veilAlpha();
+            if (alpha <= 0.004F) {
+                return;
+            }
+            int a = Math.max(0, Math.min(255, Math.round(alpha * 255.0F)));
+            extractor.fill(0, 0, extractor.guiWidth(), extractor.guiHeight(), a << 24);
+        } catch (Throwable t) {
+            report("drawPortalVeil", t);
+        }
+    }
+
+    /**
+     * 记一条切屏日志，但**内容没变就不重复记**。
+     *
+     * 关闭动画期间游戏会反复调用 setScreen(null)，不去重的话一次关界面就能刷出几十行
+     * 一模一样的 "A -> (无)"；真实日志里已经被淹过一次，排查时反而更难读。
+     */
+    private static void logScreenChange(Screen current, Screen target) {
+        try {
+            String line = (current == null ? "(无)" : current.getClass().getSimpleName())
+                    + " -> " + (target == null ? "(无)" : target.getClass().getSimpleName())
+                    + (target != null && isPortalLoading(target) ? "【跨维度加载界面】" : "");
+            if (line.equals(lastScreenChange)) {
+                return;
+            }
+            lastScreenChange = line;
+            log("切屏: " + line);
+        } catch (Throwable ignored) {
+            // 日志失败不影响功能
+        }
     }
 
     /**
@@ -1019,7 +1122,7 @@ public final class UiTransitions {
     }
 
     /**
-     * 跨维度（末地门 / 地狱门）时那个"正在生成世界"的加载界面。
+     * 跨维度（末地门 / 地狱门）以及进世界时那个"正在生成世界"的加载界面。
      *
      * 26.3 里就是 LevelLoadingScreen —— 它自己带一个 Reason 字段，
      * 取值恰好是 NETHER_PORTAL / END_PORTAL / OTHER，用来区分是哪种传送门。
@@ -1027,10 +1130,26 @@ public final class UiTransitions {
      *   new LevelLoadingScreen(levelLoadTracker, reason) → Minecraft.setScreenAndShow(...)
      * 而 setScreenAndShow 内部转调 Gui.setScreen，正是本模组拦截的那个入口。
      *
-     * 这里按**关键字**匹配而不是精确类名 —— 精确匹配一旦对不上就是彻底静默失效
-     * （这功能已经因为"以为匹配上了"返工过一次），换包名、改名都不会漏。
+     * **只有这一类**才用"只淡变 + 独立时长"：存档、回标题那些 ProgressScreen
+     * 也属于加载界面，但它们该按普通界面的时长走 —— 否则用户把传送门时长调到 5 秒，
+     * 存个档也要淡 5 秒，看着就像卡住了（真实日志里出现过）。
      */
     private static boolean isPortalLoading(Screen screen) {
+        if (screen == null) {
+            return false;
+        }
+        String simple = screen.getClass().getSimpleName();
+        return simple.contains("LevelLoading") || simple.contains("ReceivingLevel");
+    }
+
+    /**
+     * 广义的"加载/等待"界面：只用来决定**要不要给它做动画**。
+     *
+     * 按关键字匹配而不是精确类名 —— 精确匹配一旦对不上就是彻底静默失效，
+     * 这个功能已经因为"以为匹配上了"返工过一次。放行动画本身没有副作用
+     * （时长与位移仍按普通规则来），所以这里宁宽勿窄。
+     */
+    private static boolean isWaitingScreen(Screen screen) {
         if (screen == null) {
             return false;
         }
