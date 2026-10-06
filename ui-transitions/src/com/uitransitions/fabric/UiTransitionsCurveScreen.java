@@ -41,8 +41,10 @@ public final class UiTransitionsCurveScreen extends Screen {
     /** 画图时上下各留出一点空间，这样带回弹过冲的曲线也画得下 */
     private static final float VIEW_MIN = -0.5F;
     private static final float VIEW_MAX = 1.5F;
-    private static final int HANDLE_RADIUS = 4;
-    private static final int GRAB_DISTANCE = 14;
+    /** 画出来的方块半径（GUI 单位，实际观感还要乘界面缩放） */
+    private static final int HANDLE_RADIUS = 5;
+    /** 离方块多近算"抓住它"；超出这个距离也照样响应，只是改成"把最近的移过来" */
+    private static final int GRAB_DISTANCE = 18;
 
     private static final int COLOR_BG = 0xFF101418;
     private static final int COLOR_BORDER = 0xFF5A6470;
@@ -75,6 +77,9 @@ public final class UiTransitionsCurveScreen extends Screen {
 
     /** 0 = 无，1 = 第一个控制点，2 = 第二个控制点 */
     private int dragging;
+
+    /** 只为诊断：前几次点击记日志，避免刷屏 */
+    private static int CLICK_LOGGED;
 
     private long startNanos;
 
@@ -147,14 +152,14 @@ public final class UiTransitionsCurveScreen extends Screen {
                 Component.literal("曲线编辑 —— " + this.target.label()),
                 this.width / 2, 14, COLOR_TEXT);
         extractor.centeredText(this.font,
-                Component.literal("按住图上的黄色方块拖动即可调整"),
+                Component.literal("在图框里任意位置点一下，最近的那个方块就会移过去；按住拖动即可微调"),
                 this.width / 2, 28, COLOR_HINT);
 
-        drawGraph(extractor);
+        drawGraph(extractor, mouseX, mouseY);
         drawPreview(extractor);
     }
 
-    private void drawGraph(GuiGraphicsExtractor extractor) {
+    private void drawGraph(GuiGraphicsExtractor extractor, int mouseX, int mouseY) {
         int x0 = this.graphX;
         int y0 = this.graphY;
         int x1 = x0 + this.graphSize;
@@ -193,19 +198,40 @@ public final class UiTransitionsCurveScreen extends Screen {
             extractor.fill(px, py, px + 2, py + 2, COLOR_CURVE);
         }
 
-        drawHandle(extractor, this.points[0], this.points[1]);
-        drawHandle(extractor, this.points[2], this.points[3]);
+        drawHandle(extractor, this.points[0], this.points[1],
+                this.dragging == 1 || isNear(mouseX, mouseY, this.points[0], this.points[1]));
+        drawHandle(extractor, this.points[2], this.points[3],
+                this.dragging == 2 || isNear(mouseX, mouseY, this.points[2], this.points[3]));
 
-        extractor.text(this.font, String.format(Locale.ROOT, "P1 %.2f, %.2f", this.points[0], this.points[1]),
-                x0, y1 + 6, COLOR_HINT);
-        extractor.text(this.font, String.format(Locale.ROOT, "P2 %.2f, %.2f", this.points[2], this.points[3]),
-                x0, y1 + 18, COLOR_HINT);
+        String state;
+        if (this.dragging == 1) {
+            state = "正在调整 P1";
+        } else if (this.dragging == 2) {
+            state = "正在调整 P2";
+        } else {
+            state = "把鼠标移到图上，点一下就能把最近的方块放过去";
+        }
+        extractor.text(this.font,
+                String.format(Locale.ROOT, "P1 %.2f, %.2f    P2 %.2f, %.2f",
+                        this.points[0], this.points[1], this.points[2], this.points[3]),
+                x0, y1 + 6, COLOR_TEXT);
+        extractor.text(this.font, Component.literal(state), x0, y1 + 18,
+                this.dragging != 0 ? COLOR_HANDLE : COLOR_HINT);
     }
 
-    private void drawHandle(GuiGraphicsExtractor extractor, float cx, float cy) {
+    private boolean isNear(double mouseX, double mouseY, float cx, float cy) {
+        return distance(mouseX, mouseY, cx, cy) <= GRAB_DISTANCE;
+    }
+
+    private void drawHandle(GuiGraphicsExtractor extractor, float cx, float cy, boolean highlighted) {
         int px = toScreenX(cx);
         int py = toScreenY(cy);
-        extractor.fill(px - HANDLE_RADIUS, py - HANDLE_RADIUS, px + HANDLE_RADIUS, py + HANDLE_RADIUS, COLOR_HANDLE);
+        int r = highlighted ? HANDLE_RADIUS + 2 : HANDLE_RADIUS;
+        if (highlighted) {
+            // 外面再套一圈，鼠标扫过去就能看出"这个可以抓"
+            extractor.fill(px - r - 2, py - r - 2, px + r + 2, py + r + 2, COLOR_HANDLE_LINE);
+        }
+        extractor.fill(px - r, py - r, px + r, py + r, COLOR_HANDLE);
     }
 
     private int toScreenX(float t) {
@@ -331,13 +357,17 @@ public final class UiTransitionsCurveScreen extends Screen {
     // ------------------------------------------------------------------ 拖拽
 
     /**
-     * 注意这里**不靠 mouseDragged**。
+     * 点击图上的**任意位置**都会有反应。
      *
-     * 26.3 里 AbstractContainerEventHandler 根本没有实现 mouseClicked，
-     * 走的是 GuiEventListener 的接口默认实现；而鼠标移动事件的分发依赖
-     * MouseHandler 的内部状态（按下时屏幕有没有"接手"）。实测下来 mouseDragged
-     * 并不保证送到 —— 表现就是"能点住、但拖不动"。
-     * 所以按住之后改用 mouseMoved 跟踪：它只要界面在最上层就会持续送达。
+     * 之前是"必须点中那个小方块才能拖"，点在图上别的地方什么都不会发生 ——
+     * 用起来就像"点了没反应"。现在改成：
+     *   · 点在方块附近      → 抓住它，继续拖
+     *   · 点在图上其它位置  → 把**最近的那个**方块挪到点击处，并顺势抓住
+     * 无论点哪里，曲线都会立刻跟着变，反馈是确定的。
+     *
+     * 另外这里**不靠 mouseDragged**：26.3 里 AbstractContainerEventHandler 没有实现
+     * mouseClicked，拖动依赖 MouseHandler 的内部状态，mouseDragged 不保证送到。
+     * 所以按住之后改用 mouseMoved 跟踪（那个是无条件送达的）。
      */
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
@@ -349,14 +379,29 @@ public final class UiTransitionsCurveScreen extends Screen {
         }
         double mx = event.x();
         double my = event.y();
+        // 前几次点击记一行日志：万一"点了还是没反应"，看日志就能分清是
+        // "点击根本没送到这个界面"还是"送到了但没命中图框"，不用再来回猜
+        if (CLICK_LOGGED < 6) {
+            CLICK_LOGGED++;
+            System.out.println("[UI Transitions] 曲线界面收到左键点击 (" + Math.round(mx) + ","
+                    + Math.round(my) + ")  图框=" + this.graphX + "," + this.graphY
+                    + " 尺寸=" + this.graphSize + "  在图框内=" + isInsideGraph(mx, my));
+        }
+        if (!isInsideGraph(mx, my)) {
+            return false;
+        }
         int first = distance(mx, my, this.points[0], this.points[1]);
         int second = distance(mx, my, this.points[2], this.points[3]);
-        if (first <= GRAB_DISTANCE || second <= GRAB_DISTANCE) {
-            this.dragging = first <= second ? 1 : 2;
-            applyDrag(mx, my);
-            return true;
-        }
-        return false;
+        // 抓住离得近的那个；点在图上别处时，同样是把最近的那个挪过来 —— 行为一致
+        this.dragging = first <= second ? 1 : 2;
+        applyDrag(mx, my);
+        return true;
+    }
+
+    /** 鼠标是不是在图框里（留几像素余量，贴着边框点也算） */
+    private boolean isInsideGraph(double mouseX, double mouseY) {
+        return mouseX >= this.graphX - 2 && mouseX <= this.graphX + this.graphSize + 2
+                && mouseY >= this.graphY - 2 && mouseY <= this.graphY + this.graphSize + 2;
     }
 
     @Override
