@@ -160,6 +160,11 @@ public final class UiTransitions {
                 long closeDuration = closeDurationNanos(current);
                 long backdate = backdateNanos(
                         solveProgress(TransitionConfig.closeCurve(), visualAlpha(current), true), closeDuration);
+                if (isPortalLoading(current)) {
+                    log("渐出（跨维度加载界面）: " + current.getClass().getSimpleName()
+                            + " reason=" + portalReason(current)
+                            + " 时长=" + (closeDuration / 1_000_000L) + "ms 位移=" + offsetFor(current));
+                }
                 CLOSING.put(current, new Close(now - backdate, closeDuration, null));
                 OPEN_START.remove(current);
                 FINISHED.remove(current);
@@ -179,6 +184,11 @@ public final class UiTransitions {
             if (target != null && shouldAnimate(target)) {
                 // 之前正在关闭这个界面（重新打开）：同样按当前透明度接续
                 long openDuration = openDurationNanos(target);
+                if (isPortalLoading(target)) {
+                    log("渐入（跨维度加载界面）: " + target.getClass().getSimpleName()
+                            + " reason=" + portalReason(target)
+                            + " 时长=" + (openDuration / 1_000_000L) + "ms 位移=" + offsetFor(target));
+                }
                 long backdate = 0L;
                 if (CLOSING.containsKey(target)) {
                     backdate = backdateNanos(
@@ -853,22 +863,53 @@ public final class UiTransitions {
             String name = screen.getClass().getName();
             TransitionConfig.noteSeenScreen(name);      // 记下来给配置界面做提示
             if (TransitionConfig.isExcluded(name)) {
+                noteSkip(screen, "在排除列表里");
                 return false;
             }
             if (TransitionConfig.animateAllScreens()) {
                 return true;
             }
-            // 传送门/维度切换的加载界面单独放行：它不是容器界面，
-            // 但用户希望穿越传送门时有过渡（只淡变、且更长，见 offsetFor 与时长）。
+            // 跨维度加载界面单独放行：它不是容器界面，但用户希望穿传送门时有过渡
+            // （只淡变、且更长，见 offsetFor 与时长）
             if (isPortalLoading(screen)) {
                 return true;
             }
-            // 容器界面之外，再放行 JEI / REI / EMI 这类物品管理器的界面（可配置）
-            return screen instanceof AbstractContainerScreen<?> || TransitionConfig.isExtraScreen(name);
+            if (screen instanceof AbstractContainerScreen<?> || TransitionConfig.isExtraScreen(name)) {
+                return true;
+            }
+            noteSkip(screen, "不是容器界面，也不在额外适配列表里");
+            return false;
         } catch (Throwable t) {
             report("shouldAnimate", t);
             return false;
         }
+    }
+
+    /** 每个类只记一次，免得刷屏 */
+    private static final Set<String> SKIP_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * 记一条"这个界面为什么没做动画"。
+     *
+     * 排查"某个界面怎么没效果"时，没这条日志就只能靠猜 ——
+     * 而白名单判定恰恰是最容易静默失效的地方。
+     */
+    private static void noteSkip(Screen screen, String why) {
+        try {
+            if (SKIP_LOGGED.size() > 200) {
+                return;
+            }
+            if (SKIP_LOGGED.add(screen.getClass().getName() + "|" + why)) {
+                log("不做动画: " + screen.getClass().getSimpleName() + " —— " + why);
+            }
+        } catch (Throwable ignored) {
+            // 日志失败不影响功能
+        }
+    }
+
+    /** 统一前缀，方便在 logs/latest.log 里搜 */
+    private static void log(String message) {
+        System.out.println("[UI Transitions] " + message);
     }
 
     /**
@@ -973,18 +1014,37 @@ public final class UiTransitions {
     }
 
     /**
-     * 穿越传送门（末地门 / 地狱门）时的加载界面。
+     * 跨维度（末地门 / 地狱门）时那个"正在生成世界"的加载界面。
      *
-     * 26.3 里这个界面叫 LevelLoadingScreen（"正在下载地形"就是它），
-     * 首次进世界和维度切换走的都是它。
+     * 26.3 里就是 LevelLoadingScreen —— 它自己带一个 Reason 字段，
+     * 取值恰好是 NETHER_PORTAL / END_PORTAL / OTHER，用来区分是哪种传送门。
+     * 客户端收到换维度的包之后是这么显示的：
+     *   new LevelLoadingScreen(levelLoadTracker, reason) → Minecraft.setScreenAndShow(...)
+     * 而 setScreenAndShow 内部转调 Gui.setScreen，正是本模组拦截的那个入口。
+     *
+     * 这里按**简单类名**匹配而不是全限定名：换个包名、或者将来它被挪个位置都不至于静默失效。
      */
     private static boolean isPortalLoading(Screen screen) {
         if (screen == null) {
             return false;
         }
-        String name = screen.getClass().getName();
-        return "net.minecraft.client.gui.screens.LevelLoadingScreen".equals(name)
-                || "net.minecraft.client.gui.screens.ProgressScreen".equals(name);
+        String simple = screen.getClass().getSimpleName();
+        return "LevelLoadingScreen".equals(simple)
+                || "ProgressScreen".equals(simple)
+                || "GenericWaitingScreen".equals(simple)
+                || "ReceivingLevelScreen".equals(simple);
+    }
+
+    /** 读一下 LevelLoadingScreen 的 reason，日志里能看出是哪种传送门（读不到就返回 "?"） */
+    private static String portalReason(Screen screen) {
+        try {
+            java.lang.reflect.Field field = screen.getClass().getDeclaredField("reason");
+            field.setAccessible(true);
+            Object value = field.get(screen);
+            return value == null ? "?" : value.toString();
+        } catch (Throwable t) {
+            return "?";
+        }
     }
 
     /** 传送门加载界面默认只淡入淡出、不位移 */

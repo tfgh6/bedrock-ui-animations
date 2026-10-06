@@ -38,6 +38,26 @@ public class AbstractContainerScreen<T> extends Screen {
     protected int topPos;
 }
 """,
+    # 跨维度时的加载界面。模组按**简单类名**识别它，所以存根放哪个包都能命中 ——
+    # 这正是我们要锁住的行为：它不是容器界面，必须被单独放行。
+    "net/minecraft/client/gui/screens/LevelLoadingScreen.java": """
+package net.minecraft.client.gui.screens;
+
+/** 与 26.3 一致：带一个 reason 字段（NETHER_PORTAL / END_PORTAL / OTHER） */
+public class LevelLoadingScreen extends Screen {
+    public enum Reason { NETHER_PORTAL, END_PORTAL, OTHER }
+
+    private Reason reason;
+
+    public LevelLoadingScreen(Reason reason) {
+        this.reason = reason;
+    }
+
+    public Reason reason() {
+        return this.reason;
+    }
+}
+""",
     "net/minecraft/client/gui/Gui.java": """
 package net.minecraft.client.gui;
 

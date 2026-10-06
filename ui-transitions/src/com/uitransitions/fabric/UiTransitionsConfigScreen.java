@@ -125,15 +125,6 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
 
-        // 曲线编辑器入口（点一下开新界面，图上有曲线和渐入/渐出示例）
-        anim.addEntry(new CurveEditorEntry(Component.literal("▶ 打开曲线编辑器（渐入）"),
-                parent, UiTransitionsCurveScreen.Target.OPEN));
-        anim.addEntry(new CurveEditorEntry(Component.literal("▶ 打开曲线编辑器（渐出）"),
-                parent, UiTransitionsCurveScreen.Target.CLOSE));
-        anim.addEntry(entries.startTextDescription(Component.literal(
-                "曲线编辑器里可以直接拖动两个控制点，右边会同步示范渐入与渐出的效果；"
-                        + "点「完成」会写入并自动把该方向切到 custom。")).build());
-
         // ============================================================ 参与动画的部分
         ConfigCategory layers = builder.getOrCreateCategory(Component.literal("参与动画的部分"));
 
@@ -327,12 +318,6 @@ public final class UiTransitionsConfigScreen {
                 "可用值: " + String.join(" / ", TransitionConfig.Curve.ids())));
     }
 
-    /** 贝塞尔参数文本框的校验 */
-    private static java.util.Optional<Component> bezierError(String value) {
-        return TransitionConfig.isValidBezier(value)
-                ? java.util.Optional.empty()
-                : java.util.Optional.of(Component.literal("格式：x1,y1,x2,y2（四个数字，逗号分隔）"));
-    }
 
     /** "a,b,c" -> ["a","b","c"]（配置文件里是逗号分隔的字符串，界面用列表更好操作） */
     private static java.util.List<String> splitScreens(String value) {
@@ -389,133 +374,4 @@ public final class UiTransitionsConfigScreen {
         return sb.toString();
     }
 
-    /**
-     * 一行"按钮"式的配置项：点一下打开曲线编辑界面。
-     *
-     * Cloth Config 没有内置的按钮型条目，只能自己实现一个 AbstractConfigListEntry。
-     * 为保险起见，曲线仍然保留了文本框入口（见「自定义参数」两项）——
-     * 万一这个自绘条目在某些版本上表现异常，功能也不会因此不可达。
-     */
-    private static final class CurveEditorEntry
-            extends me.shedaniel.clothconfig2.api.AbstractConfigListEntry<Object> {
-
-        private static final int COLOR_BOX = 0xFF2B2F36;
-        private static final int COLOR_BOX_HOVER = 0xFF3A4048;
-        private static final int COLOR_BORDER = 0xFF6FD08C;
-        private static final int COLOR_LABEL = 0xFFFFFFFF;
-
-        private final Component label;
-        private final Screen returnTo;
-        private final UiTransitionsCurveScreen.Target target;
-        private boolean requiresRestart;
-
-        private CurveEditorEntry(Component label, Screen returnTo, UiTransitionsCurveScreen.Target target) {
-            super(label, false);
-            this.label = label;
-            this.returnTo = returnTo;
-            this.target = target;
-        }
-
-        @Override
-        public Component getFieldName() {
-            return this.label;
-        }
-
-        @Override
-        public boolean isRequiresRestart() {
-            return this.requiresRestart;
-        }
-
-        @Override
-        public void setRequiresRestart(boolean requiresRestart) {
-            this.requiresRestart = requiresRestart;
-        }
-
-        @Override
-        public java.util.Optional<Object> getDefaultValue() {
-            return java.util.Optional.empty();
-        }
-
-        @Override
-        public Object getValue() {
-            return null;
-        }
-
-        @Override
-        public me.shedaniel.clothconfig2.api.AbstractConfigEntry<Object> provideReferenceEntry() {
-            return this;
-        }
-
-        @Override
-        public java.util.List<? extends net.minecraft.client.gui.narration.NarratableEntry> narratables() {
-            return java.util.Collections.emptyList();
-        }
-
-        @Override
-        public java.util.List<? extends net.minecraft.client.gui.components.events.GuiEventListener> children() {
-            return java.util.Collections.emptyList();
-        }
-
-        @Override
-        public int getItemHeight() {
-            return 24;
-        }
-
-        @Override
-        public void extractRenderState(GuiGraphicsExtractor extractor, int index, int y, int x,
-                                       int entryWidth, int entryHeight, int mouseX, int mouseY,
-                                       boolean isHovered, float delta) {
-            boolean hover = mouseX >= x && mouseX <= x + entryWidth && mouseY >= y && mouseY <= y + entryHeight;
-            extractor.fill(x, y, x + entryWidth, y + entryHeight, hover ? COLOR_BOX_HOVER : COLOR_BOX);
-            // outline 是 (x, y, 宽, 高) —— 和 fill 的 (x0,y0,x1,y1) 不一样
-            extractor.outline(x, y, entryWidth, entryHeight, COLOR_BORDER);
-            extractor.centeredText(net.minecraft.client.Minecraft.getInstance().font,
-                    this.label, x + entryWidth / 2, y + (entryHeight - 8) / 2, COLOR_LABEL);
-        }
-
-        @Override
-        public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubleClick) {
-            if (event.button() != 0) {
-                return false;
-            }
-            openEditor();
-            return true;
-        }
-
-        @Override
-        public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
-            // 键盘也能开：Tab 选中后按回车/空格（用裸键码，免得编译期依赖 lwjgl 的 GLFW 常量）
-            int key = event.key();
-            if (key == 257 || key == 335 || key == 32) {
-                openEditor();
-                return true;
-            }
-            return false;
-        }
-
-        /**
-         * 打开编辑器。
-         *
-         * 用 execute 推迟一帧再切屏：点击是在 Cloth 的鼠标处理里边发生的，
-         * 直接切屏等于在它的循环中途把当前界面换掉，容易被它随后的收尾逻辑覆盖掉
-         * （表现就是"点了没反应"）。顺带把异常打出来，不然失败得无声无息。
-         */
-        private void openEditor() {
-            net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
-            Screen parent = this.returnTo;
-            UiTransitionsCurveScreen.Target target = this.target;
-            System.out.println("[UI Transitions] 曲线编辑器条目被点击 -> " + target);
-            minecraft.execute(() -> {
-                try {
-                    minecraft.setScreenAndShow(new UiTransitionsCurveScreen(parent, target));
-                    System.out.println("[UI Transitions] 已打开曲线编辑器，当前界面="
-                            + (minecraft.gui.screen() == null ? "null"
-                               : minecraft.gui.screen().getClass().getName()));
-                } catch (Throwable t) {
-                    System.out.println("[UI Transitions] 打开曲线编辑器失败: " + t);
-                    t.printStackTrace();
-                }
-            });
-        }
-    }
 }

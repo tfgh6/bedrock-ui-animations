@@ -508,6 +508,26 @@ public class VerifyAdvanced {
                 "渐入=" + TransitionConfig.openCurve().easeOut(0.5F)
                         + " 渐出=" + TransitionConfig.closeCurve().easeOut(0.5F));
 
+        // ---------- 13) 跨维度加载界面：必须被放行，且用更长的、只淡变的过渡 ----------
+        Screen portal = new net.minecraft.client.gui.screens.LevelLoadingScreen(
+                net.minecraft.client.gui.screens.LevelLoadingScreen.Reason.NETHER_PORTAL);
+        check("跨维度加载界面会被放行动画（它不是容器界面）",
+                UiTransitions.shouldAnimate(portal), "shouldAnimate=false");
+
+        TransitionConfig.setDurationMsBoth(300);
+        TransitionConfig.setPortalDurationMs(3000);
+        gui.setScreen(new Screen());
+        UiTransitions.interceptSetScreen(gui, portal);
+        gui.setScreen(portal);
+        Thread.sleep(800);                                  // 远超普通 300ms，但远不到 3000ms
+        UiTransitions.beginContentLayer(portal, extractor);
+        int portalAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endContentLayer(portal, extractor);
+        check("800ms 时加载界面仍在淡入（说明用的是 portalDurationMs 而不是普通时长）",
+                portalAlpha > 0 && portalAlpha < 255, "alpha=" + portalAlpha);
+        check("加载界面默认只淡变不位移", TransitionConfig.portalFadeOnly(),
+                "portalFadeOnly=false");
+
         TransitionConfig.resetToDefaults();
         System.out.println();
         if (failures == 0) {

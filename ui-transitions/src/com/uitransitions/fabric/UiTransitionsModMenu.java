@@ -19,14 +19,12 @@ public final class UiTransitionsModMenu implements ModMenuApi {
 
     @Override
     public ConfigScreenFactory<?> getModConfigScreenFactory() {
-        if (!FabricLoader.getInstance().isModLoaded("cloth-config")) {
-            System.out.println("[UI Transitions] 未安装 Cloth Config，跳过配置界面（可直接编辑 config/ui-transitions.properties）");
-            return null;
-        }
+        // 入口页本身不依赖 Cloth Config（曲线编辑器是本模组自带的），
+        // 所以即使没装 Cloth 也照样给按钮，进去以后那个按钮会提示缺库。
         try {
-            return parent -> UiTransitionsConfigScreen.create(parent);
+            return parent -> new UiTransitionsHubScreen(parent);
         } catch (Throwable t) {
-            System.err.println("[UI Transitions] 配置界面不可用: " + t);
+            System.err.println("[UI Transitions] 入口页不可用: " + t);
             return null;
         }
     }
