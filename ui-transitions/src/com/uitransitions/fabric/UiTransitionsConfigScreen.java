@@ -542,7 +542,8 @@ public final class UiTransitionsConfigScreen {
                                        boolean isHovered, float delta) {
             boolean hover = mouseX >= x && mouseX <= x + entryWidth && mouseY >= y && mouseY <= y + entryHeight;
             extractor.fill(x, y, x + entryWidth, y + entryHeight, hover ? COLOR_BOX_HOVER : COLOR_BOX);
-            extractor.outline(x, y, x + entryWidth, y + entryHeight, COLOR_BORDER);
+            // outline 是 (x, y, 宽, 高) —— 和 fill 的 (x0,y0,x1,y1) 不一样
+            extractor.outline(x, y, entryWidth, entryHeight, COLOR_BORDER);
             extractor.centeredText(net.minecraft.client.Minecraft.getInstance().font,
                     this.label, x + entryWidth / 2, y + (entryHeight - 8) / 2, COLOR_LABEL);
         }

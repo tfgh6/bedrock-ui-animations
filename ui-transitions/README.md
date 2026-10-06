@@ -261,11 +261,55 @@ NeoForge 侧只做了结构性验证（元数据 + 相同的 Mixin 配置 + 不�
 # C. 离线：状态机断言（桩类的 gameDirectory 落在临时目录，不会写到仓库里）
 & '<python>' tools\run_verify.py         # 编译并运行 verify-uit 下的全部断言
 
-# D. 实机：启动游戏 + 截图时间线（会写入实例目录并弹出游戏窗口）
+# D. 实机可视化测试（推荐用它，下面那条是它的底层）
+& '<python>' visualtest\visual_test.py                  # 全流程：编译 + 打包 + 启动 + 抓帧 + 汇总
+& '<python>' visualtest\visual_test.py --phases curve    # 只验曲线编辑器（不用建世界，快）
+& '<python>' visualtest\visual_test.py --list           # 看有哪些阶段
+
+# D'. 底层启动器（visual_test.py 内部就是调它）
 & '<python>' visualtest\launch_mc.py `
-    --extra-mod build\ui-transitions\Bedrock-UI-Animations-1.3.0-fabric+neoforge.jar `
-    --extra-mod build\visualtest\UI-Transitions-VisualTest-1.0.0.jar
+    --extra-mod build\ui-transitions\Bedrock-UI-Animations-1.3.6-fabric.jar `
+    --extra-mod build\visualtest-driver.jar
 ```
+
+### 实机可视化测试（`visualtest/visual_test.py`）
+
+渲染层级、画中画、自绘界面这些东西在状态机断言里测不到，只能真的把游戏跑起来看画面。
+这个脚本就是干这个的，**加新功能时也用它**：
+
+| 步骤 | 做什么 |
+| --- | --- |
+| 1/4 | 编译并打包模组（`tools/compile.py` + `ui-transitions/build_jar.py`） |
+| 2/4 | 用**与启动时完全同一条 classpath**编译测试驱动并打成 jar |
+| 3/4 | 按 PCL2 的版本 JSON 启动 26.3 Fabric，自动进场、按脚本操作、抓帧 |
+| 4/4 | 汇总截图数量、并从游戏日志里挑出失败/警告行 |
+
+阶段用 `--phases` 选（`--list` 可查）：
+
+| 阶段 | 覆盖 | 需要进世界 |
+| --- | --- | --- |
+| `panels` | 合成面板开/关动画、稳定态、`animatePanel=false` 对照、字幕探针 | 否 |
+| `config` | Cloth 图形化配置界面 | 否 |
+| `curve` | 曲线编辑器（渐入 / 渐出两页） | 否 |
+| `world` | 只进世界并抓一张 | 是 |
+| `inventory` | 生存背包：玩家小模型（画中画）是否跟着界面动 | 是 |
+| `enchant` | 附魔台：附魔书（画中画）是否跟着动、有没有被裁 | 是 |
+| `creative` | 创造物品栏：分类标签切换 + 滚动逐格渐变 | 是 |
+| `sodium` | Sodium 视频设置里的本模组页面 | 否 |
+
+产物：截图在 `build/visual-out/`（连拍也归档到这里），游戏输出在 `build/mc-visualtest.log`。
+
+几个刻意的设计，都是踩过坑之后定下来的：
+
+* **截图在游戏内用 `Screenshot.grab` 直接抓帧**，不靠外部录像 —— 像素级准确、不掉帧、
+  不受窗口遮挡影响。要判断"某个元素有没有被裁掉"这类问题，录像反而不如它。
+  想看整体观感可以另外开 OBS 录，但逐帧结论以这里的截图为准。
+* **`--print-classpath` 的 stdout 必须只有 classpath 一行**（诊断信息走 stderr）。
+  多一个换行就会让 `-cp` 整体失效，症状是"MC 的类全都找不到"，很难往这上面想。
+* **按 `fabric.mod.json` 的版本号精确挑 jar**，不按文件名排序取第一个 ——
+  `build/ui-transitions/` 里会堆着历史版本，排序会拿到旧的那一个。
+* **子进程一律 `-X utf8` + `PYTHONIOENCODING=utf-8`**：这些脚本都打印中文，
+  Windows 上 Python 默认按 GBK 编码 stdout，不加会直接 `UnicodeEncodeError`。
 
 B 这一步针对的是本项目最容易踩的坑：mixin 配置写的是 `defaultRequire: 0`（为了跨版本优雅降级），
 代价是描述符写错、目标方法改名、调用点被删都**不会有任何报错**，只表现为"某个功能不见了"。

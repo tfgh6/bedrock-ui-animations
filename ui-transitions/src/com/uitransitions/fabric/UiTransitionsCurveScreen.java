@@ -148,7 +148,9 @@ public final class UiTransitionsCurveScreen extends Screen {
         int y1 = y0 + this.graphSize;
 
         extractor.fill(x0, y0, x1, y1, COLOR_BG);
-        extractor.outline(x0, y0, x1, y1, COLOR_BORDER);
+        // 注意：outline 是 (x, y, 宽, 高)，fill 是 (x0, y0, x1, y1) —— 两者语义不同。
+        // 曾经按 fill 的写法传过 x1,y1，结果边框画成了两倍大（实机截图里一眼可见）。
+        extractor.outline(x0, y0, this.graphSize, this.graphSize, COLOR_BORDER);
 
         // 参考网格：0.25 / 0.5 / 0.75
         for (int i = 1; i < 4; i++) {
@@ -236,7 +238,7 @@ public final class UiTransitionsCurveScreen extends Screen {
     /** 一小段"界面"按曲线淡入/淡出，顺带带一点位移，尽量贴近实际观感 */
     private void drawStrip(GuiGraphicsExtractor extractor, int x, int y, int width, int height, boolean opening) {
         extractor.fill(x, y, x + width, y + height, COLOR_BG);
-        extractor.outline(x, y, x + width, y + height, COLOR_BORDER);
+        extractor.outline(x, y, width, height, COLOR_BORDER);   // outline = (x, y, 宽, 高)
 
         int cycleMs = 1400;
         long elapsed = (System.nanoTime() - this.startNanos) / 1_000_000L;

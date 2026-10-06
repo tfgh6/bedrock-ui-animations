@@ -220,6 +220,10 @@ def main():
     parser.add_argument("--print", action="store_true", dest="print_only")
     parser.add_argument("--extra-mod", action="append", default=[],
                         help="额外放进 mods 的 jar 路径")
+    parser.add_argument("--jvm-arg", action="append", default=[],
+                        help="额外追加的 JVM 参数（可重复），例如 -Duitransitions.visualTest.phases=curve")
+    parser.add_argument("--print-classpath", action="store_true", dest="print_classpath",
+                        help="只打印 classpath 并退出（供 visual_test.py 编译测试驱动复用）")
     args = parser.parse_args()
 
     import json
@@ -265,9 +269,11 @@ def main():
                 skipped_arch.append(os.path.basename(local))
     classpath = os.pathsep.join(entries)
     if skipped_arch:
+        # 走 stderr：--print-classpath 的 stdout 必须**只有** classpath 一行，
+        # 否则调用方拼出来的 -cp 会带上换行，整个 classpath 静默失效。
         print("按架构(%s)跳过 %d 个原生库: %s"
               % (JVM_ARCH, len(skipped_arch), ", ".join(sorted(skipped_arch)[:4])
-                 + (" ..." if len(skipped_arch) > 4 else "")))
+                 + (" ..." if len(skipped_arch) > 4 else "")), file=sys.stderr)
 
     # ---- 命令行 ----
     command = [JAVA]
@@ -283,12 +289,19 @@ def main():
     command = [c for c in command if c]
     command = [expand(c, classpath) or c for c in command]
 
+    if args.print_classpath:
+        # 供测试脚本编译驱动用：与真正启动时**完全同一条** classpath，避免两边不一致
+        print(classpath)
+        return 0
+
     # 我们的附加参数（放在最前，避免被 JSON 里的参数覆盖）
     command[1:1] = [
         "-Xmx2G",
         "-Duitransitions.visualTest=true",
         "-Duitransitions.visualTest.dir=" + VISUAL_OUT,
     ]
+    # 用户追加的 JVM 参数（阶段选择等）
+    command[1:1] = list(args.jvm_arg)
 
     command.append(version["mainClass"])
     for item in version.get("arguments", {}).get("game", []):
