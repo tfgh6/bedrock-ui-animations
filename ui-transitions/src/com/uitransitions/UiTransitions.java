@@ -46,6 +46,8 @@ public final class UiTransitions {
     private static final ThreadLocal<Float> LAYER_ALPHA = ThreadLocal.withInitial(() -> 1.0F);
     private static final ThreadLocal<Boolean> STATIC_REGION = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> HUD_PAUSED = ThreadLocal.withInitial(() -> false);
+    /** pauseForHud 是否真的抵消过位移（跟随动画那条路不抵消，恢复时也不能补） */
+    private static final ThreadLocal<Boolean> HUD_SHIFTED = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
     /** 当前这一帧的界面是否已收到关闭指令（收到就立即隐藏玩家模型） */
     /** 本帧内容层整体的淡变透明度（帧级：直到下一帧开始才复位，供 HUD 快捷栏判断用） */
@@ -80,6 +82,13 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> PREMULTIPLIED = ThreadLocal.withInitial(() -> false);
     /** 本帧的动画透明度：物品渲染状态没登记到（例如状态是在动画开始前建立的）就退回这个值 */
     private static final ThreadLocal<Float> FRAME_ALPHA = ThreadLocal.withInitial(() -> 1.0F);
+
+    /**
+     * 文字的透明度。与 WINDOW_ALPHA 分开，是为了让「文字」能配一条自己的曲线：
+     * WINDOW_ALPHA 管的是物品与矩形，文字走这里（见 applyAlphaText）。
+     * 内容层没在动画时保持 1.0，文字就是原样。
+     */
+    private static final ThreadLocal<Float> TEXT_ALPHA = ThreadLocal.withInitial(() -> 1.0F);
     /**
      * 当前背景层用的提取器。
      *
@@ -89,6 +98,8 @@ public final class UiTransitions {
      * 而不是只在 Screen.extractBackground 这一个调用点上打补丁。
      */
     private static final ThreadLocal<GuiGraphicsExtractor> BACKGROUND_EXTRACTOR = new ThreadLocal<>();
+    /** 当前处于"背景层"的界面：遮罩要按自己的曲线重算透明度时需要它 */
+    private static final ThreadLocal<Screen> BACKGROUND_SCREEN = new ThreadLocal<>();
 
     /** 创造模式分类标签等"换页"动画：记录每屏的开始时间与滚动方向 */
     private static final Map<Screen, TabSwitch> TAB_SWITCH = new WeakHashMap<>();
@@ -278,6 +289,7 @@ public final class UiTransitions {
             beginLayer(screen, extractor, progress, false);
             BACKGROUND_PUSHED.set(true);
             BACKGROUND_EXTRACTOR.set(extractor);      // 供 Hud 里的字幕抵消使用
+            BACKGROUND_SCREEN.set(screen);
         } catch (Throwable t) {
             report("beginBackgroundLayer", t);
         }
@@ -296,6 +308,7 @@ public final class UiTransitions {
             report("endBackgroundLayer", t);
         } finally {
             BACKGROUND_EXTRACTOR.remove();
+            BACKGROUND_SCREEN.remove();
         }
     }
 
@@ -372,11 +385,19 @@ public final class UiTransitions {
     private static void beginLayer(Screen screen, GuiGraphicsExtractor extractor, float progress,
                                    boolean contentLayer) {
         float shift = shift(screen, progress);
-        float alpha = TransitionConfig.fade() ? alpha(screen, progress, contentLayer) : 1.0F;
+        // 底板与物品各用各的曲线；文字再单独算一条（见 TEXT_ALPHA）
+        TransitionConfig.Part part = contentLayer
+                ? TransitionConfig.Part.ITEMS : TransitionConfig.Part.PANEL;
+        float alpha = TransitionConfig.fade() ? alpha(screen, progress, part) : 1.0F;
+        float textAlpha = alpha;
+        if (TransitionConfig.fade() && contentLayer && TransitionConfig.fadeText()) {
+            textAlpha = alpha(screen, progress, TransitionConfig.Part.TEXT);
+        }
         LAYER_SHIFT.set(shift);
         LAYER_ALPHA.set(alpha);
         WINDOW_ALPHA.set(alpha);
         FRAME_ALPHA.set(alpha);
+        TEXT_ALPHA.set(textAlpha);
         PIP_FRAME_ALPHA = alpha;       // 帧级：渲染阶段贴画中画时还要用
         Matrix3x2fStack pose = extractor.pose();
         pose.pushMatrix();
@@ -398,7 +419,13 @@ public final class UiTransitions {
             if (!TransitionConfig.animateDim() && shift != 0.0F) {
                 extractor.pose().translate(0.0F, -shift);
             }
-            WINDOW_ALPHA.set(TransitionConfig.fadeDim() ? LAYER_ALPHA.get() : 1.0F);
+            // 遮罩走自己的曲线：拿当前进度重算一次，而不是沿用底板的透明度
+            float dimAlpha = LAYER_ALPHA.get();
+            Screen dimScreen = BACKGROUND_SCREEN.get();
+            if (dimScreen != null && TransitionConfig.fade()) {
+                dimAlpha = alpha(dimScreen, progress(dimScreen), TransitionConfig.Part.DIM);
+            }
+            WINDOW_ALPHA.set(TransitionConfig.fadeDim() ? dimAlpha : 1.0F);
             STATIC_REGION.set(true);
         } catch (Throwable t) {
             report("pauseForStaticRegion", t);
@@ -433,13 +460,25 @@ public final class UiTransitions {
     public static void pauseForHud() {
         try {
             GuiGraphicsExtractor extractor = BACKGROUND_EXTRACTOR.get();
-            if (extractor == null || !BACKGROUND_PUSHED.get() || HUD_PAUSED.get()
-                    || TransitionConfig.animateSubtitles()) {
+            if (extractor == null || !BACKGROUND_PUSHED.get() || HUD_PAUSED.get()) {
                 return;
             }
+            if (TransitionConfig.animateSubtitles()) {
+                // 跟随动画：位移照旧跟着走，但**淡变用字幕自己的曲线**。
+                // 这里不抵消位移，所以也不置 HUD_SHIFTED，恢复时自然不会反向补回来。
+                Screen subtitleScreen = BACKGROUND_SCREEN.get();
+                if (subtitleScreen != null && TransitionConfig.fade()) {
+                    WINDOW_ALPHA.set(alpha(subtitleScreen, progress(subtitleScreen),
+                            TransitionConfig.Part.SUBTITLES));
+                }
+                HUD_PAUSED.set(true);
+                return;
+            }
+            // 默认：冻结 —— 抵消位移并保持不透明，字幕完全等同原版
             float shift = LAYER_SHIFT.get();
             if (shift != 0.0F) {
                 extractor.pose().translate(0.0F, -shift);
+                HUD_SHIFTED.set(true);
             }
             WINDOW_ALPHA.set(1.0F);
             HUD_PAUSED.set(true);
@@ -456,9 +495,11 @@ public final class UiTransitions {
             HUD_PAUSED.set(false);
             GuiGraphicsExtractor extractor = BACKGROUND_EXTRACTOR.get();
             float shift = LAYER_SHIFT.get();
-            if (extractor != null && shift != 0.0F) {
+            // 只有冻结那次真的抵消过位移，才反向补回来
+            if (HUD_SHIFTED.get() && extractor != null && shift != 0.0F) {
                 extractor.pose().translate(0.0F, shift);
             }
+            HUD_SHIFTED.set(false);
             WINDOW_ALPHA.set(LAYER_ALPHA.get());
         } catch (Throwable t) {
             HUD_PAUSED.set(false);
@@ -478,12 +519,16 @@ public final class UiTransitions {
         if (!TransitionConfig.fadeText()) {
             return color;
         }
-        return modulate(color);
+        // 文字用自己那条曲线算出来的透明度（见 TEXT_ALPHA），物品与矩形仍走 WINDOW_ALPHA
+        return modulate(color, TEXT_ALPHA.get());
     }
 
     private static int modulate(int color) {
+        return modulate(color, WINDOW_ALPHA.get());
+    }
+
+    private static int modulate(int color, float alpha) {
         try {
-            float alpha = WINDOW_ALPHA.get();
             if (alpha >= 0.999F) {
                 return color;
             }
@@ -682,7 +727,7 @@ public final class UiTransitions {
                 FRAME_ALPHA.set(1.0F);
                 return;
             }
-            float eased = TransitionConfig.openCurve().easeOut(progress);
+            float eased = curveFor(screen, TransitionConfig.Part.TAB).easeOut(progress);
             float base = slotFloorAlpha(screen, slotY);
             float alpha = base + (1.0F - base) * eased;
             WINDOW_ALPHA.set(alpha);
@@ -823,6 +868,7 @@ public final class UiTransitions {
         try {
             FRAME_ALPHA.set(1.0F);
             WINDOW_ALPHA.set(1.0F);
+            TEXT_ALPHA.set(1.0F);
         } catch (Throwable t) {
             report("endScreenFrame", t);
         }
@@ -1025,8 +1071,8 @@ public final class UiTransitions {
             return 0.0F;
         }
         float p = elapsed / (float) veilDurationNanos;
-        // 从全黑缓缓退到透明，用渐入曲线，手感与其它动画一致
-        return 1.0F - TransitionConfig.openCurve().easeOut(p);
+        // 从全黑缓缓退到透明；走「传送门」自己的曲线（没单独配就跟随全局渐入曲线）
+        return 1.0F - TransitionConfig.curveFor(TransitionConfig.Part.PORTAL, false).easeOut(p);
     }
 
     // ================================================================== 自绘预览用的透明度通道
@@ -1121,7 +1167,12 @@ public final class UiTransitions {
      * 曲线可以在配置里分开设，所以不能再统一读 TransitionConfig.curve()。
      */
     private static TransitionConfig.Curve curveFor(Screen screen) {
-        return CLOSING.containsKey(screen) ? TransitionConfig.closeCurve() : TransitionConfig.openCurve();
+        return curveFor(screen, TransitionConfig.Part.PANEL);
+    }
+
+    /** 按部位取曲线：部位没单独配就自动回退到全局的渐入/渐出曲线 */
+    private static TransitionConfig.Curve curveFor(Screen screen, TransitionConfig.Part part) {
+        return TransitionConfig.curveFor(part, CLOSING.containsKey(screen));
     }
 
     /** 当前"可见透明度"（关闭中递减、打开中递增），用于打断时接续 */
@@ -1204,8 +1255,10 @@ public final class UiTransitions {
 
     private static final float CONTENT_FADE_SPAN = 0.92F;
 
-    private static float alpha(Screen screen, float progress, boolean contentLayer) {
-        TransitionConfig.Curve curve = curveFor(screen);
+    private static float alpha(Screen screen, float progress, TransitionConfig.Part part) {
+        TransitionConfig.Curve curve = curveFor(screen, part);
+        boolean contentLayer = part == TransitionConfig.Part.ITEMS
+                || part == TransitionConfig.Part.TEXT;
         if (CLOSING.containsKey(screen)) {
             float span = 1.0F;
             if (contentLayer && TransitionConfig.staggerClose()) {

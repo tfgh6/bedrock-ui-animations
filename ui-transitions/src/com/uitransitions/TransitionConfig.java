@@ -146,6 +146,12 @@ public final class TransitionConfig {
 
         public static final String CUSTOM_ID = "custom";
 
+        /**
+         * "跟随全局"：按部位的曲线留空时用这个占位，表示"用 openCurve / closeCurve"。
+         * 这样老配置升级后行为完全不变，界面上也能明确显示"跟随全局"。
+         */
+        public static final String FOLLOW_ID = "default";
+
         private static final int KIND_CUSTOM = 100;
 
         public static final Curve LINEAR = new Curve("linear", 0);
@@ -164,15 +170,22 @@ public final class TransitionConfig {
         private final int kind;
         /** 仅自定义曲线非空：x1,y1,x2,y2 */
         private final float[] bezier;
+        /** 仅多点曲线非空：x0,y0,x1,y1,…（x 递增，首尾固定） */
+        private final float[] points;
 
         private Curve(String id, int kind) {
-            this(id, kind, null);
+            this(id, kind, null, null);
         }
 
         private Curve(String id, int kind, float[] bezier) {
+            this(id, kind, bezier, null);
+        }
+
+        private Curve(String id, int kind, float[] bezier, float[] points) {
             this.id = id;
             this.kind = kind;
             this.bezier = bezier;
+            this.points = points;
         }
 
         /** 造一条带控制点的自定义曲线 */
@@ -182,6 +195,139 @@ public final class TransitionConfig {
 
         public String id() {
             return this.id;
+        }
+
+
+        /** 多点曲线的曲线 id 与控制点格式说明 */
+        public static final String MULTI_ID = "multi";
+        private static final int KIND_MULTI = 101;
+
+        /** 多点曲线的点：偶数下标是 x、奇数下标是 y，x 必须递增，首尾固定 (0,0) 与 (1,1) */
+        public static Curve multi(float[] points) {
+            return new Curve(MULTI_ID, KIND_MULTI, null, normalizeMulti(points));
+        }
+
+        /**
+         * 整理多点数组：按 x 排序、去掉越界点、强制首尾为 (0,0)/(1,1)。
+         *
+         * 界面允许用户随便拖，所以这里必须能容错 —— 拖出格、点重复、顺序乱了都要能救回来，
+         * 否则一次误操作就会让曲线算出 NaN。
+         */
+        public static float[] normalizeMulti(float[] raw) {
+            java.util.List<float[]> list = new java.util.ArrayList<>();
+            if (raw != null) {
+                for (int i = 0; i + 1 < raw.length; i += 2) {
+                    float x = Math.max(0.0F, Math.min(1.0F, raw[i]));
+                    float y = Math.max(-0.5F, Math.min(1.5F, raw[i + 1]));
+                    if (x > 0.0001F && x < 0.9999F) {
+                        list.add(new float[] { x, y });
+                    }
+                }
+            }
+            list.sort((a, b) -> Float.compare(a[0], b[0]));
+            // 去掉 x 挨得太近的点：挨太近会让插值区间退化成除以 0
+            java.util.List<float[]> clean = new java.util.ArrayList<>();
+            float lastX = 0.0F;
+            for (float[] p : list) {
+                if (p[0] - lastX < 0.02F) {
+                    continue;
+                }
+                clean.add(p);
+                lastX = p[0];
+            }
+            float[] out = new float[(clean.size() + 2) * 2];
+            out[0] = 0.0F;
+            out[1] = 0.0F;
+            int n = 2;
+            for (float[] p : clean) {
+                out[n++] = p[0];
+                out[n++] = p[1];
+            }
+            out[n++] = 1.0F;
+            out[n] = 1.0F;
+            return out;
+        }
+
+        /** 多点曲线的点（可能为空）；贝塞尔/命名曲线返回 null */
+        public float[] points() {
+            return this.points;
+        }
+
+        /** 相邻点之间用 smoothstep 插值：平滑、单调、不过冲 */
+        private static float multiEase(float[] pts, float x) {
+            if (pts == null || pts.length < 4) {
+                return x;
+            }
+            for (int i = 0; i + 3 < pts.length; i += 2) {
+                float x0 = pts[i];
+                float y0 = pts[i + 1];
+                float x1 = pts[i + 2];
+                float y1 = pts[i + 3];
+                if (x <= x0) {
+                    return y0;
+                }
+                if (x <= x1) {
+                    float span = x1 - x0;
+                    if (span <= 1.0E-5F) {
+                        return y1;
+                    }
+                    float t = (x - x0) / span;
+                    float s = t * t * (3.0F - 2.0F * t);       // smoothstep
+                    return y0 + (y1 - y0) * s;
+                }
+            }
+            return pts[pts.length - 1];
+        }
+
+        /** 多点曲线的点用 "x,y;x,y;…" 存；非法输入回退成空（等价线性） */
+        public static float[] parseMulti(String spec) {
+            if (spec == null || spec.isBlank()) {
+                return new float[0];
+            }
+            java.util.List<Float> vals = new java.util.ArrayList<>();
+            for (String pair : spec.split(";")) {
+                String[] xy = pair.split(",");
+                if (xy.length != 2) {
+                    return new float[0];
+                }
+                try {
+                    vals.add(Float.parseFloat(xy[0].trim()));
+                    vals.add(Float.parseFloat(xy[1].trim()));
+                } catch (NumberFormatException e) {
+                    return new float[0];
+                }
+            }
+            float[] out = new float[vals.size()];
+            for (int i = 0; i < out.length; i++) {
+                out[i] = vals.get(i);
+            }
+            return normalizeMulti(out);
+        }
+
+        /** 多点曲线的点格式化成字符串（含首尾） */
+        public static String formatMulti(float[] pts) {
+            if (pts == null || pts.length < 4) {
+                return "0,0;1,1";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i + 1 < pts.length; i += 2) {
+                if (sb.length() > 0) {
+                    sb.append(';');
+                }
+                sb.append(trimFloat(pts[i])).append(',').append(trimFloat(pts[i + 1]));
+            }
+            return sb.toString();
+        }
+
+        private static String trimFloat(float v) {
+            String s = String.format(java.util.Locale.ROOT, "%.3f", v);
+            while (s.contains(".") && (s.endsWith("0"))) {
+                s = s.substring(0, s.length() - 1);
+            }
+            if (s.endsWith(".")) {
+                s = s.substring(0, s.length() - 1);
+            }
+            return s;
         }
 
         /** 自定义曲线的控制点；命名曲线返回 null */
@@ -209,6 +355,8 @@ public final class TransitionConfig {
                     return 1.0F - (float) Math.sqrt(Math.max(0.0, 1.0 - (double) x * x));
                 case 7:
                     return 2.70158F * x * x * x - 1.70158F * x * x;
+                case KIND_MULTI:
+                    return multiEase(this.points, x);
                 default:
                     return bezierEase(this.bezier, x);
             }
@@ -275,6 +423,10 @@ public final class TransitionConfig {
                 if (CUSTOM_ID.equals(trimmed)) {
                     return custom(TransitionConfig.parseBezier(DEFAULT_CUSTOM_BEZIER));
                 }
+                if (MULTI_ID.equals(trimmed)) {
+                    // 具体点位由 TransitionConfig 按方向/部位解析，这里只给个能用的默认
+                    return multi(new float[0]);
+                }
                 for (Curve curve : BUILT_IN) {
                     if (curve.id.equals(trimmed)) {
                         return curve;
@@ -286,11 +438,12 @@ public final class TransitionConfig {
 
         /** 全部可选 id（含 custom），供配置界面列出 */
         public static String[] ids() {
-            String[] ids = new String[BUILT_IN.length + 1];
+            String[] ids = new String[BUILT_IN.length + 2];
             for (int i = 0; i < BUILT_IN.length; i++) {
                 ids[i] = BUILT_IN[i].id;
             }
             ids[BUILT_IN.length] = CUSTOM_ID;
+            ids[BUILT_IN.length + 1] = MULTI_ID;
             return ids;
         }
     }
@@ -388,6 +541,18 @@ public final class TransitionConfig {
         if (!isValidBezier(legacyCustom)) {
             legacyCustom = DEFAULT_CUSTOM_BEZIER;
         }
+        // 按部位的曲线：没写过的部位保持"跟随全局"
+        resetPartCurves();
+        for (Part part : Part.values()) {
+            for (boolean closing : new boolean[] { false, true }) {
+                String dir = closing ? "close" : "open";
+                String globalCustom = closing ? closeCurveCustom : openCurveCustom;
+                String id = properties.getProperty("curve." + part.id() + "." + dir, Curve.FOLLOW_ID);
+                String pts = properties.getProperty("curveCustom." + part.id() + "." + dir, globalCustom);
+                partMap(closing, false).put(part, id == null ? Curve.FOLLOW_ID : id.trim().toLowerCase(java.util.Locale.ROOT));
+                partMap(closing, true).put(part, isValidBezier(pts) ? pts : DEFAULT_CUSTOM_BEZIER);
+            }
+        }
         setOpenCurveCustomInternal(properties.getProperty("openCurveCustom", legacyCustom));
         setCloseCurveCustomInternal(properties.getProperty("closeCurveCustom", legacyCustom));
         rebuildSets();
@@ -420,6 +585,18 @@ public final class TransitionConfig {
         properties.setProperty("closeCurve", closeCurveId);
         properties.setProperty("openCurveCustom", openCurveCustom);
         properties.setProperty("closeCurveCustom", closeCurveCustom);
+        // 只写"不跟随全局"的部位，配置文件才不会被 28 行 default 淹没
+        for (Part part : Part.values()) {
+            for (boolean closing : new boolean[] { false, true }) {
+                String dir = closing ? "close" : "open";
+                String id = partCurveId(part, closing);
+                if (!Curve.FOLLOW_ID.equals(id)) {
+                    properties.setProperty("curve." + part.id() + "." + dir, id);
+                    properties.setProperty("curveCustom." + part.id() + "." + dir,
+                            partCurveCustom(part, closing));
+                }
+            }
+        }
         properties.setProperty("portalDurationMs", Integer.toString(portalDurationMs));
         properties.setProperty("fade", Boolean.toString(fade));
         properties.setProperty("fadeDim", Boolean.toString(fadeDim));
@@ -503,6 +680,7 @@ public final class TransitionConfig {
         closeCurveCache = Curve.CUBIC;
         openCurveCustom = DEFAULT_CUSTOM_BEZIER;
         closeCurveCustom = DEFAULT_CUSTOM_BEZIER;
+        resetPartCurves();
 
         rebuildSets();
         save();
@@ -648,6 +826,108 @@ public final class TransitionConfig {
     }
 
     /** 渐出（关闭）用的曲线 */
+    /** 可以单独配曲线的"部位"。顺序即界面上动画列表的顺序。 */
+    public enum Part {
+        PANEL("panel"),
+        DIM("dim"),
+        ITEMS("items"),
+        TEXT("text"),
+        SUBTITLES("subtitles"),
+        TAB("tab"),
+        PORTAL("portal");
+
+        private final String id;
+
+        Part(String id) {
+            this.id = id;
+        }
+
+        public String id() {
+            return this.id;
+        }
+
+        public static Part byId(String id) {
+            for (Part p : values()) {
+                if (p.id.equals(id)) {
+                    return p;
+                }
+            }
+            return null;
+        }
+    }
+
+    /** 按部位存的曲线 id；没设过 / 设成 default 就跟随全局 */
+    private static final java.util.Map<Part, String> PART_OPEN_CURVE =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
+    private static final java.util.Map<Part, String> PART_CLOSE_CURVE =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
+    private static final java.util.Map<Part, String> PART_OPEN_CUSTOM =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
+    private static final java.util.Map<Part, String> PART_CLOSE_CUSTOM =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
+    private static final java.util.Map<Part, Curve> PART_CACHE =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
+
+    private static java.util.Map<Part, String> partMap(boolean closing, boolean custom) {
+        if (closing) {
+            return custom ? PART_CLOSE_CUSTOM : PART_CLOSE_CURVE;
+        }
+        return custom ? PART_OPEN_CUSTOM : PART_OPEN_CURVE;
+    }
+
+    /** 这个部位这一方向配的是哪条曲线（可能是 FOLLOW_ID） */
+    public static String partCurveId(Part part, boolean closing) {
+        return partMap(closing, false).getOrDefault(part, Curve.FOLLOW_ID);
+    }
+
+    public static String partCurveCustom(Part part, boolean closing) {
+        return partMap(closing, true).getOrDefault(part, DEFAULT_CUSTOM_BEZIER);
+    }
+
+    /**
+     * 实际要用的曲线：配了就用配的，没配（default）就回退到全局的渐入/渐出曲线。
+     * 核心代码只调这一个，不必关心"跟随全局"这回事。
+     */
+    public static Curve curveFor(Part part, boolean closing) {
+        String id = partCurveId(part, closing);
+        if (part == null || Curve.FOLLOW_ID.equals(id)) {
+            return closing ? closeCurve() : openCurve();
+        }
+        return resolveCurve(id, partCurveCustom(part, closing));
+    }
+
+    public static synchronized void setPartCurve(Part part, boolean closing, String id) {
+        if (part == null) {
+            return;
+        }
+        String clean = id == null ? Curve.FOLLOW_ID : id.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!Curve.FOLLOW_ID.equals(clean)
+                && !Curve.MULTI_ID.equals(clean)
+                && !Curve.byId(clean).id().equals(clean)) {
+            clean = Curve.FOLLOW_ID;
+        }
+        partMap(closing, false).put(part, clean);
+        save();
+    }
+
+    public static synchronized void setPartCurveCustom(Part part, boolean closing, String points) {
+        if (part == null) {
+            return;
+        }
+        partMap(closing, true).put(part, isValidBezier(points) ? points : DEFAULT_CUSTOM_BEZIER);
+        // 改控制点意味着想用自定义曲线，顺手把这一项切到 custom
+        partMap(closing, false).put(part, Curve.CUSTOM_ID);
+        save();
+    }
+
+    /** 全部回到"跟随全局" */
+    private static void resetPartCurves() {
+        for (java.util.Map<Part, String> m : java.util.List.of(
+                PART_OPEN_CURVE, PART_CLOSE_CURVE, PART_OPEN_CUSTOM, PART_CLOSE_CUSTOM)) {
+            m.clear();
+        }
+    }
+
     public static Curve closeCurve() {
         return closeCurveCache;
     }
@@ -664,6 +944,9 @@ public final class TransitionConfig {
     private static Curve resolveCurve(String id, String customPoints) {
         if (Curve.CUSTOM_ID.equals(id)) {
             return Curve.custom(parseBezier(customPoints));
+        }
+        if (Curve.MULTI_ID.equals(id)) {
+            return Curve.multi(Curve.parseMulti(customPoints));
         }
         return Curve.byId(id);
     }
@@ -694,6 +977,11 @@ public final class TransitionConfig {
     public static boolean isValidBezier(String value) {
         if (value == null) {
             return false;
+        }
+        // 多点曲线存的是 "x,y;x,y;…"，用的是同一个字段，所以这里要一并放行 ——
+        // 否则用户在图上拖出来的点会被判成非法、悄悄退回默认值。
+        if (value.indexOf(';') >= 0) {
+            return Curve.parseMulti(value).length >= 4;
         }
         String[] parts = value.split(",");
         if (parts.length != 4) {
