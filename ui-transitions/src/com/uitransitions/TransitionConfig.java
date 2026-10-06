@@ -40,7 +40,8 @@ public final class TransitionConfig {
      * 所以默认**只淡入淡出、不位移**，而且比普通界面长一些 —— 免得一闪而过。
      */
     public static final int DEFAULT_PORTAL_DURATION_MS = 1500;
-    public static final int MIN_PORTAL_DURATION_MS = 100;
+    /** 下限给到 300：100ms 的淡变在实机上就是"闪一下"，等于没做（真实日志里出现过 100ms） */
+    public static final int MIN_PORTAL_DURATION_MS = 300;
     public static final int MAX_PORTAL_DURATION_MS = 10000;
 
     private static volatile boolean portalFadeOnly = true;

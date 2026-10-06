@@ -985,9 +985,12 @@ public final class UiTransitions {
     /** 画遮罩。界面存在时由 Screen 的收尾注入调用，没有界面时由 HUD 注入调用。 */
     public static void drawPortalVeil(GuiGraphicsExtractor extractor) {
         try {
-            if (!TransitionConfig.enabled() || !TransitionConfig.portalFadeOnly()) {
+            if (!TransitionConfig.enabled()) {
                 return;
             }
+            // 这里**不再**看 portalFadeOnly：那个开关的意思是"要不要滑动"，
+            // 而遮罩方案本来就是只淡变。之前拿它当总开关，用户一关掉就彻底没有遮罩，
+            // 表现成"一点效果都没有"（真实日志里就是 100ms + 开关状态不明）。
             float alpha = veilAlpha();
             if (alpha <= 0.004F) {
                 return;

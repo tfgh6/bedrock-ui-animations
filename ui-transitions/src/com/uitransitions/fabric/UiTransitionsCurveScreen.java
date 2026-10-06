@@ -67,6 +67,9 @@ public final class UiTransitionsCurveScreen extends Screen {
     /** 正在编辑的控制点（x1,y1,x2,y2）；x 在 0..1，y 允许超出 */
     private float[] points = { 0.25F, 0.1F, 0.25F, 1.0F };
 
+    /** 四个原版滑块：不依赖鼠标拖拽，点一下就能改值 */
+    private final ValueSlider[] sliders = new ValueSlider[4];
+
     private int graphX;
     private int graphY;
     private int graphSize;
@@ -99,24 +102,30 @@ public final class UiTransitionsCurveScreen extends Screen {
     protected void init() {
         this.startNanos = System.nanoTime();
         int margin = 20;
-        int size = Math.min(150, Math.max(80, Math.min(this.width / 3, this.height - 130)));
+        int buttonRow = 26;
+        // 图 + 四个滑块要竖着排下来，所以图不能再占满高度
+        int size = Math.min(120, Math.max(70, Math.min(this.width / 2 - margin - 10,
+                this.height - buttonRow - 150)));
         this.graphSize = size;
         this.graphX = margin;
-        this.graphY = 52;
+        this.graphY = 46;
 
-        this.previewX = this.graphX + this.graphSize + 24;
+        this.previewX = this.graphX + this.graphSize + 22;
         this.previewY = this.graphY;
-        this.previewWidth = Math.max(120, this.width - this.previewX - margin);
-        this.previewHeight = Math.max(80, this.height - this.previewY - 60);
+        this.previewWidth = Math.max(110, this.width - this.previewX - margin);
+        this.previewHeight = Math.max(70, this.height - this.previewY - buttonRow - 76);
+
+        buildSliders();
 
         int buttonWidth = 90;
         int gap = 8;
         int total = buttonWidth * 3 + gap * 2;
         int x = (this.width - total) / 2;
-        int y = this.height - 26;
+        int y = this.height - 24;
         addRenderableWidget(Button.builder(Component.literal("重置"), b -> {
             float[] def = TransitionConfig.parseBezier(TransitionConfig.DEFAULT_CUSTOM_BEZIER);
             this.points = new float[] { def[0], def[1], def[2], def[3] };
+            syncSliders();
         }).bounds(x, y, buttonWidth, 20).build());
         addRenderableWidget(Button.builder(Component.literal("完成"), b -> {
             save();
@@ -125,6 +134,39 @@ public final class UiTransitionsCurveScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("取消"), b ->
                 this.minecraft.setScreenAndShow(this.parent))
                 .bounds(x + (buttonWidth + gap) * 2, y, buttonWidth, 20).build());
+    }
+
+    /**
+     * 四个值各配一个**原版滑块**。
+     *
+     * 为什么一定要有：图上的拖拽依赖鼠标事件，而在触屏设备（Pojav/Zalith）上，
+     * 事件合成跟鼠标并不一样 —— 实测出现过"鼠标移上去有高亮，但按下去毫无反应"。
+     * 原版滑块点一下就会把值设到点击处（AbstractSliderButton.setValueFromMouse），
+     * 触控和鼠标都可靠，而且这是每个模组都在用的控件。
+     */
+    private void buildSliders() {
+        int y = this.graphY + this.graphSize + 18;
+        int x = this.graphX;
+        int w = Math.max(80, this.graphSize);
+        for (int i = 0; i < 4; i++) {
+            final int index = i;
+            boolean isX = (i % 2 == 0);
+            float min = isX ? 0.0F : VIEW_MIN;
+            float max = isX ? 1.0F : VIEW_MAX;
+            String label = new String[] { "P1 x", "P1 y", "P2 x", "P2 y" }[i];
+            ValueSlider slider = new ValueSlider(x, y + i * 22, w, 20, label, min, max,
+                    this.points[i], value -> this.points[index] = value);
+            this.sliders[i] = slider;
+            addRenderableWidget(slider);
+        }
+    }
+
+    private void syncSliders() {
+        for (int i = 0; i < 4; i++) {
+            if (this.sliders[i] != null) {
+                this.sliders[i].setFromModel(this.points[i]);
+            }
+        }
     }
 
     private void save() {
@@ -441,6 +483,63 @@ public final class UiTransitionsCurveScreen extends Screen {
         } else if (this.dragging == 2) {
             this.points[2] = cx;
             this.points[3] = cy;
+        }
+        syncSliders();      // 图上拖了，滑块跟着走
+    }
+
+    /**
+     * 一个值一个原版滑块。
+     *
+     * 抽象滑块点一下就会把值设到点击位置（内部走 setValueFromMouse），
+     * 所以**单击就能改**，不需要"按住拖动"—— 这正是触屏上最可靠的做法。
+     */
+    private static final class ValueSlider extends net.minecraft.client.gui.components.AbstractSliderButton {
+
+        private final String label;
+        private final float min;
+        private final float max;
+        private final java.util.function.Consumer<Float> onChange;
+
+        private ValueSlider(int x, int y, int width, int height, String label,
+                            float min, float max, float value,
+                            java.util.function.Consumer<Float> onChange) {
+            super(x, y, width, height, Component.empty(), (value - min) / (max - min));
+            this.label = label;
+            this.min = min;
+            this.max = max;
+            this.onChange = onChange;
+            updateMessage();
+        }
+
+        private float current() {
+            if (this.max <= this.min) {
+                return this.min;
+            }
+            return (float) (this.min + (this.max - this.min) * this.value);
+        }
+
+        private void setFromModel(float v) {
+            if (this.max > this.min) {
+                this.value = Math.max(0.0, Math.min(1.0, (v - this.min) / (this.max - this.min)));
+            }
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            // 构造期间父类也会调到这里，那时字段还没赋值 —— 必须挡住
+            if (this.label == null || this.max <= this.min) {
+                setMessage(Component.empty());
+                return;
+            }
+            setMessage(Component.literal(String.format(Locale.ROOT, "%s  %.2f", this.label, current())));
+        }
+
+        @Override
+        protected void applyValue() {
+            if (this.onChange != null) {
+                this.onChange.accept(current());
+            }
         }
     }
 
