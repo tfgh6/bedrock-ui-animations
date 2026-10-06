@@ -243,25 +243,79 @@ Java 25，由脚本直接按版本 JSON 启动；测试用 `-Duitransitions.visu
 
 结论：**Fabric 路径已在真实游戏里端到端验证通过**（加载 → 注入 → 底板+内容动画 → 遮罩静止 → 收尾），
 新增的独立开关与图形化设置界面也都实测有效。
-NeoForge 侧只做了结构性验证（元数据 + 相同的 Mixin 配置 + 不使用任何加载器 API），未实际启动过 NeoForge。
+
+### NeoForge 路径（1.4.1 起已实机验证）
+
+**2026-10-06 更新**：NeoForge 侧已经在真实环境里启动验证通过，不再是"只做结构性验证"。
+
+验证方式见 `neotest/neoforge_test.py`：它按版本 JSON 拼出完整启动命令，
+在**独立的测试游戏目录**里启动真实的 NeoForge 客户端，然后核对日志。
+实测输出（NeoForge 26.3.0.48-beta / Cloth Config 26.3.159）：
+
+```
+Mod List:
+    Bedrock UI Animations 1.4.1 (ui_transitions)
+    Cloth Config v26.3 API 26.3.159 (cloth_config)
+    Minecraft 26.3 (minecraft)
+    NeoForge 26.3.0.48-beta (neoforge)
+
+[Bedrock UI Animations] NeoForge 入口：已检测到 Cloth Config
+[Bedrock UI Animations] 已注册 NeoForge 配置入口（模组列表里的配置按钮）
+[UI Transitions] 配置已加载 (…/config/ui-transitions.properties) enabled=true open=500ms/cubic …
+[UI Transitions] 切屏: (无) -> GenericMessageScreen
+[UI Transitions] 不做动画: GenericMessageScreen —— 不是容器界面，也不在额外适配列表里
+```
+
+> 顺带说明：模组的日志走 `System.out`，**不会进 `logs/latest.log`**（那里面只有 Log4j 的输出）。
+> 脚本必须另外抓进程的 stdout，否则永远等不到成功标记 —— 这点踩过。
+
+### 两次教训（都写进了流程，不靠自觉）
+
+**① 桩类编译通过 ≠ NeoForge 能跑。**
+
+`tools/compile.py` 在拿不到 NeoForge 开发期 API 时会生成桩类做类型检查。
+但桩类是**我们自己写的**，它只能证明"类型对得上"，证明不了方法签名、
+包路径、以及 jar 会不会被 FML 接受。
+
+1.3.0~1.4.0 的每个包都因为**桩类被打进 jar**（`net/neoforged/**`，触发 JPMS 包冲突）
+而在 NeoForge 上完全无法启动，而构建日志一路绿灯 —— 只有一句"兼容性未验证"的警告飘过去。
+
+现在：编译**优先使用本机真实 NeoForge API**（从 `libraries/` 里自动找
+`neoforge-*-universal.jar` + FML loader + bus + mergetool），找不到才退回桩类，
+并且会明确打印用的是哪一种。
+
+**② 这类问题必须让构建直接失败，不能只警告。**
+
+`build_jar.py` 新增硬闸：产物里只要出现 `com/uitransitions/` 之外的 class 就
+**中止打包并退出非 0**。已用故意制造的污染验证过确实会拦下。
 
 ---
 
 ## 6. 自行构建 / 复现验证
 
 ```powershell
-# A. 离线：编译 + 打包（依赖路径集中在 tools\compile.py，不用手拼 classpath）
+# 一键跑完全部离线关卡（发版前必须全绿）
+& '<python>' tools\verify_all.py
+& '<python>' tools\verify_all.py --neoforge   # 连真实 NeoForge 实机启动一起跑
+
+# 各关卡也可以单独跑：
 & '<python>' tools\compile.py            # 编译到 build\ui-transitions\classes
-& '<python>' ui-transitions\build_jar.py # 元数据自检 + 核对 Mixin 注入目标 + 打包
+& '<python>' ui-transitions\build_jar.py # 元数据自检 + 核对 Mixin 注入目标 + 产物纯净性 + 打包
 & '<python>' ui-transitions\build_release.py   # 可选：拆成 Fabric / NeoForge 两个发布 jar
 
-# B. 离线：Mixin 注入目标核对（defaultRequire=0，没命中只会静默失效）
+# 离线：Mixin 注入目标核对（defaultRequire=0，没命中只会静默失效）
 & '<python>' tools\check_mixins.py       # 解析 class 文件，核对每个注入点是否真的成立
 
-# C. 离线：状态机断言（桩类的 gameDirectory 落在临时目录，不会写到仓库里）
+# 离线：状态机断言（桩类的 gameDirectory 落在临时目录，不会写到仓库里）
 & '<python>' tools\run_verify.py         # 编译并运行 verify-uit 下的全部断言
 
-# D. 实机可视化测试（推荐用它，下面那条是它的底层）
+# 实机：真实 NeoForge 客户端启动（需要机器上装了 NeoForge）
+& '<python>' neotest\neoforge_test.py            # 全自动：找安装 + 建测试目录 + 启动 + 核对日志
+& '<python>' neotest\neoforge_test.py --list     # 只列出找到的 NeoForge 安装
+& '<python>' neotest\neoforge_test.py --keep     # 保留现场（测试目录与日志）
+& '<python>' neotest\neoforge_test.py --mc <目录> --version <版本> --jar <包>
+
+# 实机可视化测试（Fabric 路径，推荐用它，下面那条是它的底层）
 & '<python>' visualtest\visual_test.py                  # 全流程：编译 + 打包 + 启动 + 抓帧 + 汇总
 & '<python>' visualtest\visual_test.py --phases curve    # 只验曲线编辑器（不用建世界，快）
 & '<python>' visualtest\visual_test.py --list           # 看有哪些阶段

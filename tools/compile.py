@@ -18,6 +18,7 @@ README 里那条一行命令很难维护（依赖路径随机器变化、还漏�
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -58,6 +59,26 @@ LIB_CANDIDATES = [
         os.path.join(REPO, "build", "libs", "sodium.jar")], False),
     ("Brigadier", [
         r"D:\and\pcl2\.minecraft\libraries\com\mojang\brigadier\1.3.11\brigadier-1.3.11.jar"], False),
+]
+
+# NeoForge 的两个核心 jar（neoforge 本体 + FML loader）从本机的 Minecraft 安装里找。
+# 找到就用**真 API** 编译，找不到才退回桩类。
+NEOFORGE_SEARCH_ROOTS = [
+    r"D:\and\pcl2\.minecraft\libraries",
+    os.path.join(os.environ.get("APPDATA", ""), ".minecraft", "libraries"),
+]
+# (标签, 在 jar 里的探测类, 相对 libraries 的目录前缀)
+NEOFORGE_JAR_PROBES = [
+    ("NeoForge 本体", "net/neoforged/neoforge/client/gui/IConfigScreenFactory.class",
+     os.path.join("net", "neoforged", "neoforge")),
+    ("FML Loader", "net/neoforged/fml/ModContainer.class",
+     os.path.join("net", "neoforged", "fancymodloader", "loader")),
+    ("EventBus", "net/neoforged/bus/api/IEventBus.class",
+     os.path.join("net", "neoforged", "bus")),
+    # @Mod 注解的 dist() 用的是 net.neoforged.api.distmarker.Dist，
+    # 这个类在 mergetool 的 -api 分类包里（版本 json 也把它列为运行库）
+    ("Dist / 注解支持", "net/neoforged/api/distmarker/Dist.class",
+     os.path.join("net", "neoforged", "mergetool")),
 ]
 
 NEOFORGE_STUB_FILES = {
@@ -160,19 +181,26 @@ def collect_classpath(no_stubs):
         else:
             missing_optional.append(label)
 
-    has_neoforge = any(_jar_has(j, "net/neoforged/fml/ModLoadingContext.class") for j in cp
-                       if j.endswith(".jar"))
+    # 优先用本机真实 NeoForge API。探测类必须选**26.3 里确实还存在**的：
+    # 以前探的是 net/neoforged/fml/ModLoadingContext.class，而它早已被移除，
+    # 于是永远探测失败、永远生成桩类 —— 桩类又一路放行，把真正的兼容性问题掩盖了。
+    real = find_neoforge_jars()
+    used_real_neoforge = len(real) == len(NEOFORGE_JAR_PROBES)
     used_stubs = False
-    if not has_neoforge:
+    if real:
+        for label, p in real:
+            cp.append(p)
+            print("NeoForge  : 使用本机真实 API -> %s" % os.path.basename(p))
+    if not used_real_neoforge:
         if no_stubs:
-            missing_required.append("NeoForge API (net.neoforged.fml.*)")
+            missing_required.append("NeoForge API (net.neoforged.*)")
         else:
             write_stubs()
             # 注意加的是**桩类的编译产物目录**，不是桩类源码目录：
             # 桩类只用来做类型检查，绝不能进正式产物（见 compile_stub_classes）。
             cp.append(STUB_CLASSES)
             used_stubs = True
-    return cp, missing_required, missing_optional, used_stubs
+    return cp, missing_required, missing_optional, used_stubs, used_real_neoforge
 
 
 def _jar_has(jar, entry):
@@ -181,6 +209,47 @@ def _jar_has(jar, entry):
             return entry in z.namelist()
     except Exception:                                          # noqa: BLE001
         return False
+
+
+def _version_key(path):
+    """从 .../neoforge/26.3.0.48-beta/xxx.jar 这种路径里取出可比较的版本号。"""
+    parts = path.replace("\\", "/").split("/")
+    for seg in reversed(parts[:-1]):
+        m = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?", seg)
+        if m:
+            return tuple(int(x) if x else 0 for x in m.groups())
+    return (0, 0, 0)
+
+
+def find_neoforge_jars():
+    """
+    在本机的 Minecraft 安装里找 NeoForge 的真实 API jar。
+
+    找到就用它编译 —— 这比桩类强得多：桩类只能证明"类型对得上"，
+    证明不了方法签名、包路径、以及 jar 会不会被 FML 接受。
+    （1.3.0~1.4.0 的 JPMS 包冲突就是桩类一路放行、实机直接拒启动。）
+    """
+    found = []
+    for label, probe, prefix in NEOFORGE_JAR_PROBES:
+        best = None
+        for root in NEOFORGE_SEARCH_ROOTS:
+            base = os.path.join(root, prefix)
+            if not os.path.isdir(base):
+                continue
+            for dirpath, _, files in os.walk(base):
+                for f in files:
+                    if not f.endswith(".jar"):
+                        continue
+                    p = os.path.join(dirpath, f)
+                    if "sources" in f or "javadoc" in f:
+                        continue
+                    if _jar_has(p, probe):
+                        key = _version_key(p)
+                        if best is None or key > best[0]:
+                            best = (key, p)
+        if best:
+            found.append((label, best[1]))
+    return found
 
 
 def write_stubs():
@@ -241,11 +310,14 @@ def main():
         javac = os.path.join(jdk, "bin", "javac")
     print("JDK : %s" % jdk)
 
-    cp, missing_required, missing_optional, used_stubs = collect_classpath(args.no_stubs)
+    cp, missing_required, missing_optional, used_stubs, used_real_neoforge = \
+        collect_classpath(args.no_stubs)
     if missing_required:
         sys.exit("缺少必需的依赖: %s" % ", ".join(missing_required))
     if missing_optional:
         print("提示: 缺少可选依赖 %s（用到它的类会编译失败）" % ", ".join(missing_optional))
+    if used_real_neoforge:
+        print("NeoForge  : 已用真实 API 编译，签名与包路径都是真的 ✅")
     if used_stubs:
         print()
         print("!! 未找到 NeoForge 开发期 API，已生成仅供类型检查的桩类 -> %s" % STUBS)
