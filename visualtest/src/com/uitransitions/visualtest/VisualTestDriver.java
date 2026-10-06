@@ -121,6 +121,27 @@ public final class VisualTestDriver {
             capture(minecraft, outDir, "configgui", System.nanoTime(), 0);
         }
 
+        // ---------- 配置界面里的"打开曲线编辑器"入口能不能点开 ----------
+        if (phaseEnabled("configclick")) {
+            log("测试配置界面里的曲线编辑器入口（用户反馈过点了没反应）");
+            openConfigScreen(minecraft);
+            sleep(2500);
+            clickCurveEditorEntry(minecraft);
+            sleep(2500);
+            Screen now = minecraft.gui.screen();
+            String name = now == null ? "null" : now.getClass().getName();
+            log("点击后当前界面 = " + name);
+            if (name.contains("CurveScreen")) {
+                log("结果：曲线编辑器打开成功 ✅");
+                capture(minecraft, outDir, "curve_from_config", System.nanoTime(), 0);
+            } else {
+                log("结果：曲线编辑器没打开 ❌");
+                capture(minecraft, outDir, "configclick_fail", System.nanoTime(), 0);
+            }
+            closeScreen(minecraft);
+            sleep(1500);
+        }
+
         // ---------- 曲线编辑器（不需要世界） ----------
         if (phaseEnabled("curve")) {
             log("打开曲线编辑器（渐入）");
@@ -352,8 +373,6 @@ public final class VisualTestDriver {
         setConfigBoolean("setFadeText", true);
         setConfigBoolean("setAnimateAllScreens", false);
         setConfigBoolean("setOverlayModsFadeOnly", false);
-        setConfigBoolean("setPlayerModelFollowsAnimation", true);
-        setConfigBoolean("setHidePlayerModelOnClose", false);
         setConfigInt("setOpenDurationMs", 3000);
         setConfigInt("setCloseDurationMs", 3000);
         setConfigFloat("setOffset", 200.0F);
@@ -807,6 +826,76 @@ public final class VisualTestDriver {
             extractor.fill(cx - 60, cy - 30, cx + 60, cy + 30, 0xFF3AA76D);     // 槽内物品
             extractor.text(Minecraft.getInstance().font, "UI TRANSITIONS", cx - 78, cy - 4, 0xFFFFFFFF);
         }
+    }
+
+    // ================================================================== 新增：配置界面的曲线编辑器入口
+
+    /**
+     * 在配置界面里找到"打开曲线编辑器"那个自绘条目，替用户点一下，看它到底开不开。
+     *
+     * 用户反馈过这个入口"点了没反应"，而它在截图上看起来完全正常 ——
+     * 这种只有交互才暴露的问题，必须真的派发一次点击才测得出来。
+     */
+    private static void clickCurveEditorEntry(Minecraft minecraft) {
+        minecraft.execute(() -> {
+            try {
+                Screen screen = minecraft.gui.screen();
+                if (screen == null) {
+                    log("没有界面可点");
+                    return;
+                }
+                Object entry = findWidget(screen, "CurveEditorEntry");
+                if (entry == null) {
+                    log("在配置界面里没找到 CurveEditorEntry（条目没被建出来？）");
+                    return;
+                }
+                log("找到曲线编辑器条目: " + entry.getClass().getName());
+                java.lang.reflect.Method clicked = entry.getClass().getMethod(
+                        "mouseClicked", net.minecraft.client.input.MouseButtonEvent.class, boolean.class);
+                // 条目是私有内部类：方法本身是 public，但类对外不可见，反射必须先开权限
+                clicked.setAccessible(true);
+                net.minecraft.client.input.MouseButtonInfo info =
+                        new net.minecraft.client.input.MouseButtonInfo(0, 0);
+                // 坐标随便给：这个条目不看坐标，只要左键就开
+                Object event = new net.minecraft.client.input.MouseButtonEvent(0.0, 0.0, info);
+                Object result = clicked.invoke(entry, event, false);
+                log("mouseClicked 返回 " + result);
+            } catch (Throwable t) {
+                log("点击曲线编辑器条目失败: " + t);
+                Throwable cause = t.getCause();
+                while (cause != null) {
+                    log("  根因: " + cause);
+                    cause = cause.getCause();
+                }
+            }
+        });
+    }
+
+    /** 在控件树里按类名找控件（只匹配简单名，避免依赖具体包路径） */
+    private static Object findWidget(Object root, String simpleName) {
+        if (root == null) {
+            return null;
+        }
+        if (root.getClass().getSimpleName().equals(simpleName)) {
+            return root;
+        }
+        java.util.List<?> children;
+        try {
+            java.lang.reflect.Method method = root.getClass().getMethod("children");
+            children = (java.util.List<?>) method.invoke(root);
+        } catch (Throwable t) {
+            return null;
+        }
+        if (children == null) {
+            return null;
+        }
+        for (Object child : children) {
+            Object found = findWidget(child, simpleName);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     // ================================================================== 抓帧

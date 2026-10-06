@@ -428,9 +428,8 @@ public class VerifyAdvanced {
                 "x1=" + TransitionConfig.parseBezier("2,0,3,1")[0]
                         + " x2=" + TransitionConfig.parseBezier("2,0,3,1")[2]);
 
-        // 玩家模型：跟随模式应与内容层同透明度，而不是被推迟或隐藏
+        // 玩家模型：一律与内容层同透明度（不再有"延迟浮现 / 关闭即隐藏"的特殊处理）
         TransitionConfig.setFade(true);
-        TransitionConfig.setPlayerModelFollowsAnimation(true);
         TransitionConfig.setDurationMsBoth(2000);
         gui.setScreen(new Screen());
         Screen pipHost = new EmptyContainer();
@@ -445,26 +444,17 @@ public class VerifyAdvanced {
         int followAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
         UiTransitions.endPipBlit();
         UiTransitions.endContentLayer(pipHost, extractor);
-        check("玩家模型跟随动画时与内容层同透明度",
+        check("玩家模型与内容层同透明度（打开中段）",
                 followAlpha == layerAlpha && followAlpha < 255,
                 "内容层=" + layerAlpha + " 模型=" + followAlpha);
 
-        TransitionConfig.setPlayerModelFollowsAnimation(false);
-        TransitionConfig.setHidePlayerModelOnClose(true);
-        UiTransitions.interceptSetScreen(gui, null);        // 触发关闭 -> HIDE_PREVIEW
-        Thread.sleep(100);
-        UiTransitions.beginContentLayer(pipHost, extractor);
-        UiTransitions.beginPipBlit(fakeEntity);
-        int hiddenAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
-        UiTransitions.endPipBlit();
-        UiTransitions.endContentLayer(pipHost, extractor);
-        check("关掉跟随开关后恢复旧行为（关闭时直接隐藏模型）",
-                hiddenAlpha == 0, "alpha=" + hiddenAlpha);
+        // 关闭方向就不在这里卡时间点了：关闭会按当前可见透明度回拨进度，回拨多少取决于
+        // 上一刻的状态，纯靠 sleep 很容易刚好错过中段（试过连续采样，六次全落在结束后）。
+        // 关闭方向由实机测试覆盖：visualtest 的连拍量出布娃娃/附魔书与底板位移差为 0。
 
         UiTransitions.setOverlayModPresentForTest(null);
 
         // ---------- 12) 画中画跟随位移 + 渐入/渐出各有一份自定义曲线 ----------
-        TransitionConfig.setPlayerModelFollowsAnimation(true);
         TransitionConfig.setDurationMsBoth(2000);
         TransitionConfig.setOffset(120.0F);
         gui.setScreen(new Screen());

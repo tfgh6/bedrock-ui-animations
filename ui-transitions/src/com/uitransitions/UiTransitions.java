@@ -48,11 +48,9 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> HUD_PAUSED = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
     /** 当前这一帧的界面是否已收到关闭指令（收到就立即隐藏玩家模型） */
-    private static volatile boolean HIDE_PREVIEW = false;
     /** 本帧内容层整体的淡变透明度（帧级：直到下一帧开始才复位，供 HUD 快捷栏判断用） */
     private static volatile float FRAME_FADE_ALPHA = 1.0F;
     /** 打开界面时，玩家模型的透明度覆盖值；负数表示不干预 */
-    private static volatile float PREVIEW_ALPHA_OVERRIDE = -1.0F;
     /**
      * 内容层本帧的淡变透明度，**帧内跨阶段保留**。
      *
@@ -159,7 +157,7 @@ public final class UiTransitions {
                     return true;                       // 已经在关闭中：继续拦着，不重启动画
                 }
                 // 打开动画还没播完就关闭：按当前可见透明度反解关闭曲线的进度，接着往下走
-                long closeDuration = closeDurationNanos();
+                long closeDuration = closeDurationNanos(current);
                 long backdate = backdateNanos(
                         solveProgress(TransitionConfig.closeCurve(), visualAlpha(current), true), closeDuration);
                 CLOSING.put(current, new Close(now - backdate, closeDuration, null));
@@ -180,7 +178,7 @@ public final class UiTransitions {
             }
             if (target != null && shouldAnimate(target)) {
                 // 之前正在关闭这个界面（重新打开）：同样按当前透明度接续
-                long openDuration = openDurationNanos();
+                long openDuration = openDurationNanos(target);
                 long backdate = 0L;
                 if (CLOSING.containsKey(target)) {
                     backdate = backdateNanos(
@@ -287,26 +285,6 @@ public final class UiTransitions {
         // 这一帧若不做动画，位移必须归零：LAYER_SHIFT 在上一次动画收尾时才会回到 0，
         // 中途切到不做动画的界面会残留上一次的值，画中画就会被莫名其妙地推开。
         LAYER_SHIFT.set(0.0F);
-        // 只针对背包/容器界面里的玩家模型；书、地图等其它画中画预览照旧渐隐
-        boolean container = screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-        HIDE_PREVIEW = isClosing(screen) && container;
-        PREVIEW_ALPHA_OVERRIDE = -1.0F;
-        if (container && !HIDE_PREVIEW) {
-            try {
-                Open open = OPEN_START.get(screen);
-                if (open != null) {
-                    // 用这一段动画自己的时长，和 progress() 保持一致
-                    float progress = (System.nanoTime() - open.startNanos())
-                            / (float) open.durationNanos();
-                    // 先等一小会儿（约 35% 时长）再淡入，避免和界面一起冒出来显得突兀
-                    float delay = TransitionConfig.previewFadeDelay() / 100.0F;
-                    float delayed = (progress - delay) / Math.max(0.05F, 1.0F - delay);
-                    PREVIEW_ALPHA_OVERRIDE = Math.max(0.0F, Math.min(1.0F, delayed));
-                }
-            } catch (Throwable ignored) {
-                PREVIEW_ALPHA_OVERRIDE = -1.0F;
-            }
-        }
         try {
             FRAME_ALPHA.set(1.0F);      // 同上：非动画帧一律按不透明处理
             synchronized (ITEM_ALPHAS) {
@@ -819,21 +797,8 @@ public final class UiTransitions {
             }
             // 让画中画跟着界面一起位移（内容层滑多少，它就滑多少）
             PIP_SHIFT.set(LAYER_SHIFT.get());
-            // playerModelFollowsAnimation=true 时，玩家模型不搞特殊：
-            // 既不在打开时延迟淡入，也不在关闭时提前隐藏，而是和界面一起淡
-            boolean specialPlayerModel = isPlayerPreview(state)
-                    && !TransitionConfig.playerModelFollowsAnimation();
-            if (specialPlayerModel && !HIDE_PREVIEW && PREVIEW_ALPHA_OVERRIDE >= 0.0F) {
-                WINDOW_ALPHA.set(PREVIEW_ALPHA_OVERRIDE);
-                PIP_BLITTING.set(true);
-                return;
-            }
-            if (specialPlayerModel && TransitionConfig.hidePlayerModelOnClose() && HIDE_PREVIEW) {
-                WINDOW_ALPHA.set(0.0F);      // 关闭动画一开始：玩家模型直接不画
-                PIP_BLITTING.set(true);
-                return;
-            }
-            // 其余（书 / 地图 / 旗帜 / 玩家模型跟随模式）一律用本帧内容层的透明度
+            // 布娃娃 / 附魔书 / 地图 / 旗帜预览一视同仁：用本帧内容层的透明度一起淡，
+            // 不再给玩家模型搞"延迟浮现 + 关闭即隐藏"的特殊处理（那会在面板滑走后留下孤零零一个模型）
             WINDOW_ALPHA.set(PIP_FRAME_ALPHA);
             PIP_BLITTING.set(true);
         } catch (Throwable t) {
@@ -857,19 +822,6 @@ public final class UiTransitions {
         } catch (Throwable t) {
             report("shiftPipPose", t);
             return pose;
-        }
-    }
-
-    /** 是否是玩家模型那类画中画预览（背包里的布娃娃） */
-    private static boolean isPlayerPreview(Object state) {
-        try {
-            if (state == null) {
-                return false;
-            }
-            String name = state.getClass().getSimpleName();
-            return name.contains("Entity") || name.contains("Player");
-        } catch (Throwable t) {
-            return false;
         }
     }
 
@@ -904,6 +856,11 @@ public final class UiTransitions {
                 return false;
             }
             if (TransitionConfig.animateAllScreens()) {
+                return true;
+            }
+            // 传送门/维度切换的加载界面单独放行：它不是容器界面，
+            // 但用户希望穿越传送门时有过渡（只淡变、且更长，见 offsetFor 与时长）。
+            if (isPortalLoading(screen)) {
                 return true;
             }
             // 容器界面之外，再放行 JEI / REI / EMI 这类物品管理器的界面（可配置）
@@ -979,7 +936,7 @@ public final class UiTransitions {
         }
         Open open = OPEN_START.get(screen);
         if (open == null) {
-            OPEN_START.put(screen, new Open(now, openDurationNanos()));
+            OPEN_START.put(screen, new Open(now, openDurationNanos(screen)));
             return 0.0F;
         }
         return clamp01((now - open.startNanos()) / (float) open.durationNanos());
@@ -1015,13 +972,36 @@ public final class UiTransitions {
         return curve.easeOut(progress);
     }
 
+    /**
+     * 穿越传送门（末地门 / 地狱门）时的加载界面。
+     *
+     * 26.3 里这个界面叫 LevelLoadingScreen（"正在下载地形"就是它），
+     * 首次进世界和维度切换走的都是它。
+     */
+    private static boolean isPortalLoading(Screen screen) {
+        if (screen == null) {
+            return false;
+        }
+        String name = screen.getClass().getName();
+        return "net.minecraft.client.gui.screens.LevelLoadingScreen".equals(name)
+                || "net.minecraft.client.gui.screens.ProgressScreen".equals(name);
+    }
+
+    /** 传送门加载界面默认只淡入淡出、不位移 */
+    private static float offsetFor(Screen screen) {
+        if (TransitionConfig.portalFadeOnly() && isPortalLoading(screen)) {
+            return 0.0F;
+        }
+        return TransitionConfig.offset();
+    }
+
     private static float shift(Screen screen, float progress) {
         // 装了 JEI 这类"在容器界面上叠固定按钮"的模组时，改成只淡变不位移：
         // 那些按钮画在同一条渲染层里，只能靠整个界面不滑来让它们待在原地。
         if (TransitionConfig.overlayModsFadeOnly() && hasOverlayMod()) {
             return 0.0F;
         }
-        float offset = TransitionConfig.offset();
+        float offset = offsetFor(screen);
         TransitionConfig.Curve curve = curveFor(screen);
         if (CLOSING.containsKey(screen)) {
             float direction = TransitionConfig.closeToBottom() ? 1.0F : -1.0F;
@@ -1049,12 +1029,18 @@ public final class UiTransitions {
      * 之前这里写的是 1..5000，而配置侧的合法范围是 50..2000，
      * 两套边界不一致，改配置范围时很容易忘掉这一处。
      */
-    private static long openDurationNanos() {
+    private static long openDurationNanos(Screen screen) {
+        if (isPortalLoading(screen)) {
+            return millisToNanos(TransitionConfig.portalDurationMs(), durationFallback());
+        }
         return millisToNanos(TransitionConfig.openDurationMs(), durationFallback());
     }
 
     /** 渐出（关闭）这一段动画的时长（纳秒） */
-    private static long closeDurationNanos() {
+    private static long closeDurationNanos(Screen screen) {
+        if (isPortalLoading(screen)) {
+            return millisToNanos(TransitionConfig.portalDurationMs(), durationFallback());
+        }
         return millisToNanos(TransitionConfig.closeDurationMs(), durationFallback());
     }
 

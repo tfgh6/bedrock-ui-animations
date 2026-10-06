@@ -63,6 +63,7 @@ JAR = os.path.join(JDK, "bin", "jar.exe")
 PHASES = {
     "panels": "合成面板的开/关动画（基线，含字幕探针）",
     "config": "Cloth 图形化配置界面",
+    "configclick": "配置界面里「打开曲线编辑器」入口能不能点开",
     "curve": "曲线编辑器（渐入 / 渐出）",
     "world": "只进世界并抓一张",
     "inventory": "生存背包：玩家小模型（画中画）",

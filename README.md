@@ -22,6 +22,7 @@
 - **关闭时内容提前淡出** —— 物品与文字比底板略早结束，避免出现"底板还在、格子已经空了"的空洞
 - **玩家模型跟随动画** —— 背包里的小模型和界面一起滑动、一起淡（也可切回"延迟浮现 + 关闭即隐藏"的旧手感）
 - **画中画内容跟随位移** —— 附魔台的附魔书、背包布娃娃、地图、旗帜预览都会跟着界面一起滑，不会留在原地
+- **传送门加载单独一套** —— 穿末地门 / 地狱门时的「正在下载地形」默认只淡入淡出、不滑动，且时长更长（1500ms）
 
 ### 原地淡变（不重建界面的那些切换）
 
@@ -77,12 +78,10 @@ enabled=true                  # 总开关
 openDurationMs=500            # 渐入（打开界面）时长（50–5000 毫秒）
 closeDurationMs=500           # 渐出（关闭界面）时长（50–5000 毫秒）
 offset=120.0                  # 位移距离（像素，0 = 只淡变不位移）
-curve=cubic                   # 通用缓动曲线
 openCurve=cubic               # 渐入专用曲线（可与通用不同）
 closeCurve=cubic              # 渐出专用曲线
 openCurveCustom=0.25,0.1,0.25,1.0   # 渐入的自定义控制点 x1,y1,x2,y2
 closeCurveCustom=0.25,0.1,0.25,1.0  # 渐出的自定义控制点（两个方向各一份）
-curveCustom=0.25,0.1,0.25,1.0 # 通用自定义参数（同时套给两边）
 jelly=0.0                     # 果冻回弹强度（0 = 关闭）
 fade=true                     # 逐元素淡入淡出总开关
 fadeDim=true                  # 遮罩随动画淡出
@@ -100,10 +99,9 @@ scrollFadeBand=200            # 滚动逐格渐变的渐变带高度（16–300 
 scrollFadeMin=0               # 滚动时进入边那一侧的最低透明度（0–100 %，0 = 完全淡出）
 animateSameTypeSwitch=true    # 同类界面换页也做动画（默认做）
 animateAllScreens=false       # 所有界面都加动画（默认只做容器界面）
-playerModelFollowsAnimation=true  # 玩家模型跟随界面动画一起淡
-hidePlayerModelOnClose=true   # 仅在上面关掉时生效：关闭界面时立即隐藏玩家模型
-previewFadeDelay=35           # 仅在上面关掉时生效：打开时玩家模型延迟淡入（占时长 %）
 overlayModsFadeOnly=true      # 装了 JEI 类模组时改为只淡变不位移
+portalDurationMs=1500        # 传送门/维度切换加载界面的过渡时长（100–10000 毫秒）
+portalFadeOnly=true           # 传送门加载只淡入淡出、不滑动（默认开）
 allowLookDuringClose=true     # 关闭动画期间是否允许转动视角
 extraScreens=mezz.jei,dev.emi.emi,me.shedaniel.rei
 excludedScreens=              # 不做动画的界面（按前缀匹配，可写类名或包名）

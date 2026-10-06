@@ -121,10 +121,6 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         layers.addOption(bool(builder, "stagger_close", "关闭时内容提前淡出",
                 "关闭动画里物品与文字比底板略早结束淡出，避免出现空格子", true,
                 TransitionConfig::setStaggerClose));
-        layers.addOption(intOption(builder, "preview_fade_delay", "玩家模型延迟淡入",
-                "打开界面时玩家模型等待多久才开始淡入（占动画时长百分比）", 35, 0, 100, 5,
-                TransitionConfig::setPreviewFadeDelay,
-                value -> tr(value + "%")));
         layers.addOption(bool(builder, "animate_tab_switch", "分类标签切换动画",
                 "点创造模式物品栏的分类标签时，物品区原地淡入（底板、标签栏、快捷栏都不动）", true,
                 TransitionConfig::setAnimateTabSwitch));
@@ -142,9 +138,15 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
                 "滚动时刚进入视野那一侧最淡到什么程度（%）；0 = 完全淡出", 0, 0, 100, 5,
                 TransitionConfig::setScrollFadeMin,
                 value -> tr(value + "%")));
-        layers.addOption(bool(builder, "hide_player_model_on_close", "关闭时隐藏玩家模型",
-                "关闭界面时玩家小模型直接不画", true,
-                TransitionConfig::setHidePlayerModelOnClose));
+        layers.addOption(intOption(builder, "portal_duration_ms", "传送门加载时长",
+                "穿末地门 / 地狱门时加载界面的过渡时长；默认 1500 毫秒，比普通界面长",
+                TransitionConfig.DEFAULT_PORTAL_DURATION_MS,
+                TransitionConfig.MIN_PORTAL_DURATION_MS, TransitionConfig.MAX_PORTAL_DURATION_MS, 50,
+                TransitionConfig::setPortalDurationMs,
+                value -> tr(value + " 毫秒")));
+        layers.addOption(bool(builder, "portal_fade_only", "传送门加载只淡入淡出",
+                "打开：传送门加载界面不做上下位移，只淡变（默认）", true,
+                TransitionConfig::setPortalFadeOnly));
         // 默认值与 TransitionConfig.animateSameTypeSwitch 一致：默认是**做**动画的
         layers.addOption(bool(builder, "animate_same_type_switch", "同类界面切换也做动画",
                 "创造模式分类标签、配方书翻页这类同界面换页是否也做过渡动画（默认做）", true,
@@ -195,7 +197,6 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "animate_subtitles" -> TransitionConfig.animateSubtitles();
             case "animate_same_type_switch" -> TransitionConfig.animateSameTypeSwitch();
             case "animate_tab_switch" -> TransitionConfig.animateTabSwitch();
-            case "hide_player_model_on_close" -> TransitionConfig.hidePlayerModelOnClose();
             case "stagger_close" -> TransitionConfig.staggerClose();
             case "overlay_mods_fade_only" -> TransitionConfig.overlayModsFadeOnly();
             case "animate_all_screens" -> TransitionConfig.animateAllScreens();
@@ -203,7 +204,8 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "fade_dim" -> TransitionConfig.fadeDim();
             case "fade_items" -> TransitionConfig.fadeItems();
             case "fade_text" -> TransitionConfig.fadeText();
-            default -> throw new IllegalArgumentException("未登记的布尔选项: " + key);
+            case "portal_fade_only" -> TransitionConfig.portalFadeOnly();
+            default -> unknownBool(key);
         };
     }
 
@@ -216,9 +218,27 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "tab_switch_ms" -> TransitionConfig.tabSwitchMs();
             case "scroll_fade_band" -> TransitionConfig.scrollFadeBand();
             case "scroll_fade_min" -> TransitionConfig.scrollFadeMin();
-            case "preview_fade_delay" -> TransitionConfig.previewFadeDelay();
-            default -> throw new IllegalArgumentException("未登记的整数选项: " + key);
+            case "portal_duration_ms" -> TransitionConfig.portalDurationMs();
+            default -> unknownInt(key);
         };
+    }
+
+    /**
+     * 忘了给新选项登记 getter 时的兜底。
+     *
+     * 这里**不能抛异常**：Sodium 是在游戏启动末尾构建配置页的，
+     * 抛出去就是"Failed to build config options"直接崩在启动画面上 ——
+     * 一个漏改的分支能让整个游戏进不去（真踩过：加了 portal_duration_ms 却忘了登记）。
+     * 配置页少显示一个值是可以接受的，进不去游戏不行。
+     */
+    private static boolean unknownBool(String key) {
+        System.err.println("[UI Transitions] Sodium 配置：未登记的布尔选项 " + key + "，按 false 处理");
+        return false;
+    }
+
+    private static int unknownInt(String key) {
+        System.err.println("[UI Transitions] Sodium 配置：未登记的整数选项 " + key + "，按 0 处理");
+        return 0;
     }
 
     private static BooleanOptionBuilder bool(ConfigBuilder builder, String key, String name, String tooltip,

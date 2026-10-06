@@ -124,18 +124,6 @@ public final class UiTransitionsConfigScreen {
                 .setSaveConsumer(TransitionConfig::setCloseCurve)
                 .build());
 
-        anim.addEntry(entries.startStrField(
-                        Component.literal("自定义曲线参数"), TransitionConfig.curveCustom())
-                .setDefaultValue(TransitionConfig.DEFAULT_CUSTOM_BEZIER)
-                .setErrorSupplier(value -> TransitionConfig.isValidBezier(value)
-                        ? java.util.Optional.empty()
-                        : java.util.Optional.of(Component.literal("格式：x1,y1,x2,y2（四个数字，逗号分隔）")))
-                .setTooltip(Component.literal("把上面任意一条曲线写成 custom 就会用这四个数。"),
-                        Component.literal("和 CSS 的 cubic-bezier(x1,y1,x2,y2) 是同一套："),
-                        Component.literal("0.25,0.1,0.25,1 ≈ 默认手感；0,0,1,1 = 匀速；"),
-                        Component.literal("0.34,1.56,0.64,1 = 带一点回弹；y 可以超过 1 做过冲"))
-                .setSaveConsumer(TransitionConfig::setCurveCustom)
-                .build());
 
         // 曲线编辑器入口（点一下开新界面，图上有曲线和渐入/渐出示例）
         anim.addEntry(new CurveEditorEntry(Component.literal("▶ 打开曲线编辑器（渐入）"),
@@ -146,95 +134,14 @@ public final class UiTransitionsConfigScreen {
                 "曲线编辑器里可以直接拖动两个控制点，右边会同步示范渐入与渐出的效果；"
                         + "点「完成」会写入并自动把该方向切到 custom。")).build());
 
-        // 编辑器万一不可用时的退路：直接填这两个方向的贝塞尔参数
-        anim.addEntry(entries.startStrField(
-                        Component.literal("渐入自定义参数"), TransitionConfig.openCurveCustom())
-                .setDefaultValue(TransitionConfig.DEFAULT_CUSTOM_BEZIER)
-                .setErrorSupplier(UiTransitionsConfigScreen::bezierError)
-                .setTooltip(Component.literal("渐入方向的自定义控制点（x1,y1,x2,y2）。"),
-                        Component.literal("留作曲线编辑器之外的备用入口"))
-                .setSaveConsumer(TransitionConfig::setOpenCurveCustom)
-                .build());
-
-        anim.addEntry(entries.startStrField(
-                        Component.literal("渐出自定义参数"), TransitionConfig.closeCurveCustom())
-                .setDefaultValue(TransitionConfig.DEFAULT_CUSTOM_BEZIER)
-                .setErrorSupplier(UiTransitionsConfigScreen::bezierError)
-                .setTooltip(Component.literal("渐出方向的自定义控制点（x1,y1,x2,y2）。"),
-                        Component.literal("两个方向各存一份，互不影响"))
-                .setSaveConsumer(TransitionConfig::setCloseCurveCustom)
-                .build());
-
-        anim.addEntry(entries.startIntSlider(Component.literal("位移距离（像素）"), Math.round(TransitionConfig.offset()), 0, 400)
-                .setDefaultValue(Math.round(TransitionConfig.DEFAULT_OFFSET))
-                .setTooltip(Component.literal("界面滑动多少像素，默认 120；0 = 只淡入淡出"))
-                .setSaveConsumer(value -> TransitionConfig.setOffset(value))
-                .build());
-
-        anim.addEntry(entries.startIntSlider(Component.literal("果冻回弹强度（%）"),
-                        Math.round(TransitionConfig.jelly() * 100.0F), 0, 100)
-                .setDefaultValue(0)
-                .setTooltip(Component.literal("打开时冲过静止位置再回落的弹性手感，0 = 关闭（默认）。"),
-                        Component.literal("觉得打开动画像果冻，就把这里保持 0"))
-                .setSaveConsumer(value -> TransitionConfig.setJelly(value / 100.0F))
-                .build());
-
-        anim.addEntry(entries.startBooleanToggle(Component.literal("逐元素淡入淡出"), TransitionConfig.fade())
-                .setDefaultValue(true)
-                .setTooltip(Component.literal("总开关。关闭后只滑动、不改变透明度"))
-                .setSaveConsumer(TransitionConfig::setFade)
-                .build());
-
-        // ============================================================ 淡入淡出细节
-        ConfigCategory fadeCat = builder.getOrCreateCategory(Component.literal("淡入淡出细节"));
-
-        fadeCat.addEntry(entries.startBooleanToggle(
-                        Component.literal("遮罩随动画一起淡出"), TransitionConfig.fadeDim())
-                .setDefaultValue(true)
-                .setTooltip(Component.literal("界面淡出时，那层变暗的遮罩也一起变淡，世界随之变亮。"),
-                        Component.literal("关掉的话遮罩全程保持最深，动画中途会显得偏黑"))
-                .setSaveConsumer(TransitionConfig::setFadeDim)
-                .build());
-
-        fadeCat.addEntry(entries.startBooleanToggle(
-                        Component.literal("物品图标淡入淡出"), TransitionConfig.fadeItems())
-                .setDefaultValue(true)
-                .setTooltip(Component.literal("背包/箱子里的物品图标是否一起淡变；关掉则物品直接出现，但仍随底板滑动"))
-                .setSaveConsumer(TransitionConfig::setFadeItems)
-                .build());
-
-        fadeCat.addEntry(entries.startBooleanToggle(
-                        Component.literal("文字淡入淡出"), TransitionConfig.fadeText())
-                .setDefaultValue(true)
-                .setTooltip(Component.literal("标题、数量等文字是否一起淡变"))
-                .setSaveConsumer(TransitionConfig::setFadeText)
-                .build());
-
         // ============================================================ 参与动画的部分
         ConfigCategory layers = builder.getOrCreateCategory(Component.literal("参与动画的部分"));
-
-        layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("玩家模型跟随界面动画"), TransitionConfig.playerModelFollowsAnimation())
-                .setDefaultValue(true)
-                .setTooltip(Component.literal("打开（默认）：背包里的小模型和界面一起淡，不搞特殊。"),
-                        Component.literal("关掉：恢复旧行为 —— 打开时延迟一会儿才浮现、关闭时立刻消失。"),
-                        Component.literal("（附魔台的附魔书、地图、旗帜预览一直都是跟随动画的）"))
-                .setSaveConsumer(TransitionConfig::setPlayerModelFollowsAnimation)
-                .build());
 
         layers.addEntry(entries.startBooleanToggle(
                         Component.literal("关闭时内容提前淡出"), TransitionConfig.staggerClose())
                 .setDefaultValue(true)
                 .setTooltip(Component.literal("关闭动画里物品与文字比底板略早结束淡出，避免出现空格子"))
                 .setSaveConsumer(TransitionConfig::setStaggerClose)
-                .build());
-
-        layers.addEntry(entries.startIntSlider(Component.literal("玩家模型延迟淡入（%）"),
-                        TransitionConfig.previewFadeDelay(), 0, 100)
-                .setDefaultValue(35)
-                .setTooltip(Component.literal("仅在关掉「玩家模型跟随界面动画」时才有意义："),
-                        Component.literal("打开界面时玩家模型等待多久才开始淡入（占动画时长百分比）"))
-                .setSaveConsumer(TransitionConfig::setPreviewFadeDelay)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
@@ -310,13 +217,6 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("关闭界面时隐藏玩家模型"), TransitionConfig.hidePlayerModelOnClose())
-                .setDefaultValue(true)
-                .setTooltip(Component.literal("关闭背包时，界面里的玩家小模型直接不画（不再跟着淡出）"))
-                .setSaveConsumer(TransitionConfig::setHidePlayerModelOnClose)
-                .build());
-
-        layers.addEntry(entries.startBooleanToggle(
                         Component.literal("同类界面切换也做动画"), TransitionConfig.animateSameTypeSwitch())
                 .setDefaultValue(true)
                 .setTooltip(Component.literal("创造模式物品栏切换分类标签、配方书翻页这类同界面换页，"),
@@ -333,6 +233,31 @@ public final class UiTransitionsConfigScreen {
                         Component.literal("点 + 添加一行，填类名或包名；默认已含 JEI / EMI / REI"))
                 .setSaveConsumer(list -> TransitionConfig.setExtraScreens(joinScreens(list)))
                 .build());
+
+        // ============================================================ 传送门 / 维度切换
+        ConfigCategory portal = builder.getOrCreateCategory(Component.literal("传送门加载"));
+
+        portal.addEntry(entries.startIntSlider(Component.literal("加载动画时长（毫秒）"),
+                        TransitionConfig.portalDurationMs(),
+                        TransitionConfig.MIN_PORTAL_DURATION_MS, TransitionConfig.MAX_PORTAL_DURATION_MS)
+                .setDefaultValue(TransitionConfig.DEFAULT_PORTAL_DURATION_MS)
+                .setTooltip(Component.literal("穿过末地传送门 / 地狱门时那一下「正在下载地形」的过渡时长，"),
+                        Component.literal("默认 1500 —— 比普通界面长，免得一闪而过。"),
+                        Component.literal("这一项对渐入与渐出同时生效"))
+                .setSaveConsumer(TransitionConfig::setPortalDurationMs)
+                .build());
+
+        portal.addEntry(entries.startBooleanToggle(
+                        Component.literal("只淡入淡出（不滑动）"), TransitionConfig.portalFadeOnly())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("默认打开：传送门加载界面只做淡变，不做上下位移。"),
+                        Component.literal("关掉 = 和普通界面一样也滑动（用上面的位移距离）"))
+                .setSaveConsumer(TransitionConfig::setPortalFadeOnly)
+                .build());
+
+        portal.addEntry(entries.startTextDescription(Component.literal(
+                "覆盖的界面：LevelLoadingScreen（26.3 里「正在下载地形」就是它，\n"
+                        + "首次进世界与维度切换都走这个界面）以及 ProgressScreen。")).build());
 
         // ============================================================ 方向
         ConfigCategory direction = builder.getOrCreateCategory(Component.literal("方向"));
@@ -553,9 +478,44 @@ public final class UiTransitionsConfigScreen {
             if (event.button() != 0) {
                 return false;
             }
-            net.minecraft.client.Minecraft.getInstance().setScreenAndShow(
-                    new UiTransitionsCurveScreen(this.returnTo, this.target));
+            openEditor();
             return true;
+        }
+
+        @Override
+        public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+            // 键盘也能开：Tab 选中后按回车/空格（用裸键码，免得编译期依赖 lwjgl 的 GLFW 常量）
+            int key = event.key();
+            if (key == 257 || key == 335 || key == 32) {
+                openEditor();
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * 打开编辑器。
+         *
+         * 用 execute 推迟一帧再切屏：点击是在 Cloth 的鼠标处理里边发生的，
+         * 直接切屏等于在它的循环中途把当前界面换掉，容易被它随后的收尾逻辑覆盖掉
+         * （表现就是"点了没反应"）。顺带把异常打出来，不然失败得无声无息。
+         */
+        private void openEditor() {
+            net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
+            Screen parent = this.returnTo;
+            UiTransitionsCurveScreen.Target target = this.target;
+            System.out.println("[UI Transitions] 曲线编辑器条目被点击 -> " + target);
+            minecraft.execute(() -> {
+                try {
+                    minecraft.setScreenAndShow(new UiTransitionsCurveScreen(parent, target));
+                    System.out.println("[UI Transitions] 已打开曲线编辑器，当前界面="
+                            + (minecraft.gui.screen() == null ? "null"
+                               : minecraft.gui.screen().getClass().getName()));
+                } catch (Throwable t) {
+                    System.out.println("[UI Transitions] 打开曲线编辑器失败: " + t);
+                    t.printStackTrace();
+                }
+            });
         }
     }
 }

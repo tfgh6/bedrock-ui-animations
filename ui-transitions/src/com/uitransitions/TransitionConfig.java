@@ -33,6 +33,38 @@ public final class TransitionConfig {
     public static final int MIN_DURATION_MS = 50;
     public static final int MAX_DURATION_MS = 5000;
 
+    /**
+     * 穿越传送门（末地门 / 地狱门）时的加载界面。
+     *
+     * 那种界面本来就是一整块地形加载提示，跟着界面上下滑会很怪，
+     * 所以默认**只淡入淡出、不位移**，而且比普通界面长一些 —— 免得一闪而过。
+     */
+    public static final int DEFAULT_PORTAL_DURATION_MS = 1500;
+    public static final int MIN_PORTAL_DURATION_MS = 100;
+    public static final int MAX_PORTAL_DURATION_MS = 10000;
+
+    private static volatile boolean portalFadeOnly = true;
+    private static volatile int portalDurationMs = DEFAULT_PORTAL_DURATION_MS;
+
+    public static boolean portalFadeOnly() {
+        return portalFadeOnly;
+    }
+
+    public static int portalDurationMs() {
+        return portalDurationMs;
+    }
+
+    public static synchronized void setPortalFadeOnly(boolean value) {
+        portalFadeOnly = value;
+        save();
+    }
+
+    public static synchronized void setPortalDurationMs(int value) {
+        portalDurationMs = Math.max(MIN_PORTAL_DURATION_MS,
+                Math.min(MAX_PORTAL_DURATION_MS, value));
+        save();
+    }
+
     /** 原地淡变（点分类标签 / 滚动）的默认时长与范围 */
     public static final int DEFAULT_TAB_SWITCH_MS = 600;
     public static final int MIN_TAB_SWITCH_MS = 50;
@@ -71,8 +103,6 @@ public final class TransitionConfig {
     private static volatile int tabSwitchMs = DEFAULT_TAB_SWITCH_MS;
     private static volatile int scrollFadeBand = 200;
     private static volatile int scrollFadeMin = 0;
-    private static volatile boolean hidePlayerModelOnClose = true;
-    private static volatile int previewFadeDelay = 35;
     private static volatile String excludedScreens = "";
     private static volatile Set<String> excludedSet = Collections.emptySet();
     private static volatile String extraScreens = DEFAULT_EXTRA_SCREENS;
@@ -85,14 +115,13 @@ public final class TransitionConfig {
     private static volatile String closeCurveId = "cubic";
     private static volatile Curve openCurveCache = Curve.CUBIC;
     private static volatile Curve closeCurveCache = Curve.CUBIC;
-    /** 自定义曲线的控制点（原始字符串 + 解析结果），渐入渐出各一份 */
-    private static volatile String openCurveCustom = DEFAULT_CUSTOM_BEZIER;
+    /** 自定义曲线的控制点（原始字符串 + 解析结果），渐入渐出各一份 */    private static volatile String openCurveCustom = DEFAULT_CUSTOM_BEZIER;
     private static volatile String closeCurveCustom = DEFAULT_CUSTOM_BEZIER;
     /** 兼容旧配置：老版本只有一个 curveCustom */
     private static volatile String curveCustom = DEFAULT_CUSTOM_BEZIER;
     private static volatile float[] customBezierCache = parseBezier(DEFAULT_CUSTOM_BEZIER);
     /** 玩家模型（布娃娃）是否完全跟随界面动画 */
-    private static volatile boolean playerModelFollowsAnimation = true;
+
     /** 运行期见过的界面类名（供配置界面提示用），有上限，避免无限增长 */
     private static final java.util.LinkedHashSet<String> SEEN_SCREENS = new java.util.LinkedHashSet<>();
     private static final int MAX_SEEN_SCREENS = 120;
@@ -342,8 +371,8 @@ public final class TransitionConfig {
         tabSwitchMs = clampTabMs(readInt(properties, "tabSwitchMs", tabSwitchMs));
         scrollFadeBand = clampBand(readInt(properties, "scrollFadeBand", scrollFadeBand));
         scrollFadeMin = clampMin(readInt(properties, "scrollFadeMin", scrollFadeMin));
-        hidePlayerModelOnClose = readBoolean(properties, "hidePlayerModelOnClose", hidePlayerModelOnClose);
-        previewFadeDelay = Math.max(0, Math.min(100, readInt(properties, "previewFadeDelay", previewFadeDelay)));
+        portalFadeOnly = readBoolean(properties, "portalFadeOnly", portalFadeOnly);
+        portalDurationMs = Math.max(MIN_PORTAL_DURATION_MS, Math.min(MAX_PORTAL_DURATION_MS, readInt(properties, "portalDurationMs", portalDurationMs)));
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
         // 迁移：老配置里只有一个 durationMs / curve，把它当作渐入渐出共同的值
@@ -360,8 +389,6 @@ public final class TransitionConfig {
         customBezierCache = parseBezier(curveCustom);
         setOpenCurveCustomInternal(properties.getProperty("openCurveCustom", legacyCustom));
         setCloseCurveCustomInternal(properties.getProperty("closeCurveCustom", legacyCustom));
-        playerModelFollowsAnimation = readBoolean(properties, "playerModelFollowsAnimation",
-                playerModelFollowsAnimation);
         rebuildSets();
         // 只有在文件本来就不存在时才回写（首次运行生成默认配置）。
         // 否则"读一次配置"就会重写用户的文件，把注释和未知键全丢掉。
@@ -392,7 +419,8 @@ public final class TransitionConfig {
         properties.setProperty("curveCustom", curveCustom);
         properties.setProperty("openCurveCustom", openCurveCustom);
         properties.setProperty("closeCurveCustom", closeCurveCustom);
-        properties.setProperty("playerModelFollowsAnimation", Boolean.toString(playerModelFollowsAnimation));
+        properties.setProperty("portalFadeOnly", Boolean.toString(portalFadeOnly));
+        properties.setProperty("portalDurationMs", Integer.toString(portalDurationMs));
         properties.setProperty("fade", Boolean.toString(fade));
         properties.setProperty("fadeDim", Boolean.toString(fadeDim));
         properties.setProperty("fadeItems", Boolean.toString(fadeItems));
@@ -412,8 +440,6 @@ public final class TransitionConfig {
         properties.setProperty("tabSwitchMs", Integer.toString(tabSwitchMs));
         properties.setProperty("scrollFadeBand", Integer.toString(scrollFadeBand));
         properties.setProperty("scrollFadeMin", Integer.toString(scrollFadeMin));
-        properties.setProperty("hidePlayerModelOnClose", Boolean.toString(hidePlayerModelOnClose));
-        properties.setProperty("previewFadeDelay", Integer.toString(previewFadeDelay));
         properties.setProperty("excludedScreens", excludedScreens == null ? "" : excludedScreens);
         properties.setProperty("extraScreens", extraScreens == null ? "" : extraScreens);
         String content = renderProperties(properties);
@@ -466,8 +492,8 @@ public final class TransitionConfig {
         tabSwitchMs = DEFAULT_TAB_SWITCH_MS;
         scrollFadeBand = 200;
         scrollFadeMin = 0;
-        hidePlayerModelOnClose = true;
-        previewFadeDelay = 35;
+        portalFadeOnly = true;
+        portalDurationMs = DEFAULT_PORTAL_DURATION_MS;
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;
         curveId = Curve.CUBIC.id();
@@ -480,7 +506,7 @@ public final class TransitionConfig {
         customBezierCache = parseBezier(DEFAULT_CUSTOM_BEZIER);
         openCurveCustom = DEFAULT_CUSTOM_BEZIER;
         closeCurveCustom = DEFAULT_CUSTOM_BEZIER;
-        playerModelFollowsAnimation = true;
+
         rebuildSets();
         save();
     }
@@ -606,16 +632,6 @@ public final class TransitionConfig {
         return scrollFadeMin;
     }
 
-    /** 关闭界面时是否直接隐藏玩家模型（布娃娃） */
-    public static boolean hidePlayerModelOnClose() {
-        return hidePlayerModelOnClose;
-    }
-
-    /** 打开界面时玩家模型延迟多久才开始淡入（占动画时长的百分比） */
-    public static int previewFadeDelay() {
-        return previewFadeDelay;
-    }
-
     public static String excludedScreens() {
         return excludedScreens == null ? "" : excludedScreens;
     }
@@ -712,11 +728,6 @@ public final class TransitionConfig {
 
     private static float clampY(float v) {
         return Math.max(-2.0F, Math.min(3.0F, v));
-    }
-
-    /** 玩家模型（布娃娃）是否完全跟随界面动画（不延迟淡入、关闭时也不提前隐藏） */
-    public static boolean playerModelFollowsAnimation() {
-        return playerModelFollowsAnimation;
     }
 
     /** 记录一个见过的界面，供配置界面提示用 */
@@ -867,11 +878,6 @@ public final class TransitionConfig {
         save();
     }
 
-    public static synchronized void setPlayerModelFollowsAnimation(boolean value) {
-        playerModelFollowsAnimation = value;
-        save();
-    }
-
     /** 只写字段不存盘：给 load() 用，避免"读配置"触发一次写盘 */
     private static void setCurveIdInternal(String value) {
         Curve resolved = Curve.byId(value);
@@ -1001,16 +1007,6 @@ public final class TransitionConfig {
         save();
     }
 
-    public static synchronized void setHidePlayerModelOnClose(boolean value) {
-        hidePlayerModelOnClose = value;
-        save();
-    }
-
-    public static synchronized void setPreviewFadeDelay(int value) {
-        previewFadeDelay = Math.max(0, Math.min(100, value));
-        save();
-    }
-
     public static synchronized void setExcludedScreens(String value) {
         excludedScreens = value == null ? "" : value;
         rebuildSets();
@@ -1095,6 +1091,6 @@ public final class TransitionConfig {
                 offset(), jelly() * 100.0F,
                 fade(), fadeDim(), fadeItems(), fadeText(),
                 openFromBottom(), closeToBottom(), animateAllScreens(), animateSameTypeSwitch(),
-                animatePanel(), animateDim(), animateSubtitles(), playerModelFollowsAnimation());
+                animatePanel(), animateDim(), animateSubtitles(), portalFadeOnly(), portalDurationMs());
     }
 }
