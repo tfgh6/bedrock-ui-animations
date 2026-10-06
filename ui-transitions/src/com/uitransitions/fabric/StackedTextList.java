@@ -79,9 +79,20 @@ final class StackedTextList extends AbstractWidget {
         return this.rows.size();
     }
 
-    /** 定位两端对齐：面板宽度可以在 init 之后才确定，这里把内部布局重算一遍 */
+    /**
+     * 设置位置与尺寸。面板宽度要等 init() 之后才确定，所以布局不能只在构造时做一次。
+     *
+     * **参数顺序容易搞反**：`AbstractWidget.setRectangle` 的签名是
+     * `(x, y, width, height)`，和本方法一致 —— 但早期这里写成
+     * `setRectangle(x, y, width, height)` 却把变量按 `(x, y, x2, y2)` 理解，
+     * 结果位置被设成了 `(width, height)`、尺寸被设成了 `(x2-x, y2-y)`，
+     * 左列表于是变成 16 像素宽、停在 (191,128) 这种诡异位置，
+     * 看起来就是"左边那个列表根本没画出来"。
+     * 用 setPosition/setSize 分开写，读起来不会再和矩形坐标混淆。
+     */
     void layout(int x, int y, int width, int height) {
-        setRectangle(x, y, width, height);
+        setPosition(x, y);
+        setSize(Math.max(1, width), Math.max(1, height));
         this.rowHeight = Math.max(11, this.font.lineHeight + 2);
         this.visibleRows = Math.max(1, (height - headerHeight()) / this.rowHeight);
         clampScroll();
@@ -146,13 +157,14 @@ final class StackedTextList extends AbstractWidget {
 
         extractor.fill(x, y, x + w, y + h, COLOR_BG);
         extractor.outline(x, y, w, h, COLOR_BORDER);
-        extractor.text(this.font, getMessage(), x + 6, y + 4, COLOR_TEXT);
+        // 标题与副标题也要按宽度截断：副标题（"点一下 → 移到右边…"）比标题长得多，
+        // 窄列表里会直接画到边框外面（实测截图里能看到文字越过面板右缘）
+        drawClipped(extractor, getMessage(), x + 6, y + 4, COLOR_TEXT, x + w - 6);
         if (this.hint != null) {
-            extractor.text(this.font, this.hint, x + 6, y + 4 + this.font.lineHeight, COLOR_MUTED);
+            drawClipped(extractor, this.hint, x + 6, y + 4 + this.font.lineHeight, COLOR_MUTED, x + w - 6);
         }
-
         if (this.rows.isEmpty()) {
-            extractor.text(this.font, this.emptyText, x + 6, y + headerHeight() + 2, COLOR_EMPTY);
+            drawClipped(extractor, this.emptyText, x + 6, y + headerHeight() + 2, COLOR_EMPTY, x + w - 6);
             return;
         }
 
@@ -196,6 +208,24 @@ final class StackedTextList extends AbstractWidget {
     @Override
     protected void updateWidgetNarration(NarrationElementOutput output) {
         defaultButtonNarrationText(output);
+    }
+
+    /**
+     * 画一行文字，超出 limitX 就逐字截断。
+     *
+     * 统一走这里，避免"某处忘了截断"：列表里行文字本来就截断了，
+     * 但标题/副标题/空列表提示早期是直接 text(...) 画出去的，
+     * 窄面板上会越过边框（截图证据）。
+     */
+    private void drawClipped(GuiGraphicsExtractor extractor, Component text,
+                             int x, int y, int color, int limitX) {
+        String value = text == null ? "" : text.getString();
+        while (!value.isEmpty() && x + this.font.width(value) > limitX) {
+            value = value.substring(0, value.length() - 1);
+        }
+        if (!value.isEmpty()) {
+            extractor.text(this.font, value, x, y, color);
+        }
     }
 
     /** 供子类/页面复用：把一段普通文本包成单段行 */

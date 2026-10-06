@@ -122,24 +122,53 @@ public final class VisualTestDriver {
         }
 
         // ---------- 配置界面里的"打开曲线编辑器"入口能不能点开 ----------
-        if (phaseEnabled("configclick")) {
-            log("测试配置界面里的曲线编辑器入口（用户反馈过点了没反应）");
-            openConfigScreen(minecraft);
-            sleep(2500);
-            clickCurveEditorEntry(minecraft);
-            sleep(2500);
-            Screen now = minecraft.gui.screen();
-            String name = now == null ? "null" : now.getClass().getName();
-            log("点击后当前界面 = " + name);
-            if (name.contains("CurveScreen")) {
-                log("结果：曲线编辑器打开成功 ✅");
-                capture(minecraft, outDir, "curve_from_config", System.nanoTime(), 0);
-            } else {
-                log("结果：曲线编辑器没打开 ❌");
-                capture(minecraft, outDir, "configclick_fail", System.nanoTime(), 0);
+        // ---------- 入口页：四个按钮真的能把各自的界面打开吗 ----------
+        //
+        // 这个阶段原来是 `configclick`：当年曲线编辑器的入口是 Cloth 里的一个**自绘条目**，
+        // 渲染正常、直接派发点击也能开，但真实鼠标点击传不到它那儿 —— 那个阶段就是为抓它写的。
+        // 后来入口改成了入口页（Hub）上的**原版按钮**，那个条目连类都不存在了，
+        // 于是这个阶段变成"找一个已经删掉的东西"，永远 ❌ ——**看起来像功能坏了，
+        // 实际是测试在检查一个不存在的实现**（这种假红比假绿更浪费时间）。
+        //
+        // 现在改成检查**真正在用的那条入口链**：Hub 的每个按钮点下去，
+        // 开出来的界面类名对不对。这正是用户抱怨过"点了没反应"的那一类问题。
+        if (phaseEnabled("hub")) {
+            log("=== 入口页按钮检查 ===");
+            openHub(minecraft);
+            sleep(2000);
+            capture(minecraft, outDir, "hub", System.nanoTime(), 0);
+            // 先把入口页上的控件列一遍：按钮文字对不上、位置算错、控件没建出来，
+            // 这三种原因的修法完全不同，一眼看清能省一轮往返。
+            minecraft.execute(() -> dumpWidgets(minecraft.gui.screen()));
+            sleep(400);
+            String[] labels = { "界面动画设置", "曲线编辑器 — 渐入", "排除的界面" };
+            String[] keys = { "ui_transitions.hub.config", "ui_transitions.hub.curve_open",
+                    "ui_transitions.hub.exclude" };
+            for (int i = 0; i < labels.length; i++) {
+                String label = labels[i];
+                String key = keys[i];
+                // 每一轮都**先回到入口页**：上一轮点开的界面关闭时，"拦下切屏 + 延迟补做"
+                // 会把当前界面推到后台栈的下一层（通常是标题界面），继续在那一层找按钮
+                // 只会得到"没找到" —— 看起来像按钮坏了，其实是测试跑错界面了。
+                openHub(minecraft);
+                sleep(1500);
+                clickButtonByKey(minecraft, label, key);
+                // 要等够：点开新界面时模组会拦下切屏播关闭动画，动画播完才真正换屏。
+                // 1.8 秒在动画时长被测试基线调成 3000ms 时是**不够**的（踩过）。
+                sleep(3500);
+                Screen now = minecraft.gui.screen();
+                String name = now == null ? "null" : now.getClass().getSimpleName();
+                boolean opened = !"null".equals(name) && !name.contains("HubScreen");
+                log("点「" + label + "」-> " + name + (opened ? "  ✅" : "  ❌（没打开，还停在入口页）"));
+                if (opened) {
+                    capture(minecraft, outDir, "hub_" + phaseSlug(label), System.nanoTime(), 0);
+                    if ("exclude".equals(phaseSlug(label))) {
+                        dumpWidgets(now);
+                    }
+                }
             }
             closeScreen(minecraft);
-            sleep(1500);
+            sleep(1200);
         }
 
         // ---------- 曲线编辑器（不需要世界） ----------
@@ -774,6 +803,202 @@ public final class VisualTestDriver {
         });
     }
 
+    /** 打开入口页（Hub）。它才是用户点「配置」之后真正看到的第一屏。 */
+    private static void openHub(Minecraft minecraft) {
+        minecraft.execute(() -> {
+            try {
+                Class<?> hubClass = Class.forName("com.uitransitions.fabric.UiTransitionsHubScreen");
+                Screen parent = minecraft.gui.screen();
+                if (parent == null) {
+                    parent = new TestPanelScreen();
+                }
+                Object screen = hubClass.getConstructor(Screen.class).newInstance(parent);
+                minecraft.gui.setScreen((Screen) screen);
+                log("已打开入口页: " + screen.getClass().getName());
+            } catch (Throwable t) {
+                log("打开入口页失败: " + t);
+            }
+        });
+    }
+
+    /**
+     * 按按钮上的文字点它（当前界面的控件树里找）。
+     *
+     * 必须先 `minecraft.execute` 回到渲染线程：控件树是渲染线程的东西，
+     * 而且点击会改界面状态（本项目在 Cloth 那条路上就吃过"跨线程建屏"的亏）。
+     */
+    /**
+     * 按**翻译键**找到按钮并点它。
+     *
+     * 为什么不能按显示文字找：这些按钮是 `Component.translatable(...)`，
+     * 它的 `toString()` 是 `translation{key='ui_transitions.hub.config', args=[]}`——
+     * **永远不含中文**。第一版就是按"界面动画设置"去找的，结果一个都没找到，
+     * 于是所有按钮都报 ❌，看起来像三个按钮全坏了（实际只是找按钮的方法错了）。
+     * 翻译键是稳定的，也不会随游戏语言变。
+     *
+     * 点击**直接派发给控件本身**：这才是"按钮被按到"的语义，
+     * 而且不依赖控件树的事件分发链路（那条链路上本项目已经踩过 Cloth 自绘条目的坑）。
+     * 想验的正是"按下这个按钮，界面会不会换"，所以直接 `onPress` 更贴近事实。
+     */
+    private static void clickButtonByKey(Minecraft minecraft, String label, String translationKey) {
+        minecraft.execute(() -> {
+            try {
+                Screen screen = minecraft.gui.screen();
+                if (screen == null) {
+                    log("没有界面可点: " + label);
+                    return;
+                }
+                Object widget = findWidgetByTranslationKey(screen, translationKey);
+                if (widget == null) {
+                    log("界面上没找到键为 " + translationKey + " 的控件");
+                    dumpWidgets(screen);
+                    return;
+                }
+                net.minecraft.client.gui.navigation.ScreenRectangle bounds =
+                        (net.minecraft.client.gui.navigation.ScreenRectangle)
+                                widget.getClass().getMethod("getRectangle").invoke(widget);
+                // 走控件自己的 mouseClicked：与真实鼠标同一条"按钮被按下"的判定
+                //   · 鼠标键号：26.3 的 AbstractWidget.isValidClickButton 判的是
+                //     `button() == 1`（不是 0！）。用 0 构造事件会被控件判成"不是有效键"
+                //     直接拒绝，mouseClicked 返回 false —— **看起来像按钮坏了，其实是我们造的事件不对**。
+                // 按钮坐标取自控件自己的 getRectangle，不猜。
+                net.minecraft.client.input.MouseButtonInfo info =
+                        new net.minecraft.client.input.MouseButtonInfo(1, 0);
+                net.minecraft.client.input.MouseButtonEvent event =
+                        new net.minecraft.client.input.MouseButtonEvent(
+                                bounds.left() + bounds.width() / 2.0,
+                                bounds.top() + bounds.height() / 2.0, info);
+                // 诊断：mouseClicked 的前置条件逐条量出来
+                Object over = widget.getClass().getMethod("isMouseOver", double.class, double.class)
+                        .invoke(widget, event.x(), event.y());
+                Object result = widget.getClass()
+                        .getMethod("mouseClicked",
+                                net.minecraft.client.input.MouseButtonEvent.class, boolean.class)
+                        .invoke(widget, event, false);
+                // 松开也要派发：按钮的"按下"用 mouseClicked、"抬起"用 onRelease，
+                // 只发一半在有些控件上会留下按下状态（这里两个都发，贴近真实鼠标）。
+                widget.getClass()
+                        .getMethod("mouseReleased", net.minecraft.client.input.MouseButtonEvent.class)
+                        .invoke(widget, event);
+                log("点「" + label + "」(" + bounds.left() + "," + bounds.top() + ")"
+                        + " 键号=" + info.button()
+                        + " isMouseOver=" + over + " mouseClicked=" + result
+                        + " active=" + widget.getClass().getField("active").get(widget));
+            } catch (Throwable t) {
+                log("点「" + label + "」失败: " + t);
+                Throwable cause = t.getCause();
+                while (cause != null) {
+                    log("  根因: " + cause);
+                    cause = cause.getCause();
+                }
+            }
+        });
+    }
+
+    /** 在控件树里按**翻译键**找控件（键不受游戏语言影响，比匹配显示文字可靠） */
+    private static Object findWidgetByTranslationKey(Object root, String translationKey) {
+        if (root == null) {
+            return null;
+        }
+        try {
+            Object message = root.getClass().getMethod("getMessage").invoke(root);
+            if (message != null && message.toString().contains("key='" + translationKey + "'")) {
+                return root;
+            }
+        } catch (Throwable ignored) {
+            // 不是带文字的控件就继续往下找
+        }
+        java.util.List<?> children;
+        try {
+            children = (java.util.List<?>) root.getClass().getMethod("children").invoke(root);
+        } catch (Throwable t) {
+            return null;
+        }
+        if (children == null) {
+            return null;
+        }
+        for (Object child : children) {
+            Object found = findWidgetByTranslationKey(child, translationKey);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    /** 反射读字段，读不到就返回 "?"（诊断用，不要因为一个字段让整条日志挂掉） */
+    private static Object readFieldQuietly(Object target, String name) {
+        try {
+            Class<?> type = target.getClass();
+            while (type != null) {
+                try {
+                    java.lang.reflect.Field field = type.getDeclaredField(name);
+                    field.setAccessible(true);
+                    return field.get(target);
+                } catch (NoSuchFieldException e) {
+                    type = type.getSuperclass();
+                }
+            }
+        } catch (Throwable ignored) {
+            // 忽略
+        }
+        return "?";
+    }
+
+    /** 把界面上所有控件的文字与位置打出来：排查"按钮没建出来 / 文字对不上 / 位置算错" */
+    private static void dumpWidgets(Object root) {
+        try {
+            java.util.List<?> children =
+                    (java.util.List<?>) root.getClass().getMethod("children").invoke(root);
+            if (children == null || children.isEmpty()) {
+                log("  控件树是空的（init 没跑到？）");
+                return;
+            }
+            for (Object child : children) {
+                String message = "";
+                try {
+                    Object value = child.getClass().getMethod("getMessage").invoke(child);
+                    message = value == null ? "" : value.toString();
+                } catch (Throwable ignored) {
+                    // 不是带文字的控件
+                }
+                String bounds = "";
+                try {
+                    net.minecraft.client.gui.navigation.ScreenRectangle rect =
+                            (net.minecraft.client.gui.navigation.ScreenRectangle)
+                                    child.getClass().getMethod("getRectangle").invoke(child);
+                    bounds = " @" + rect.left() + "," + rect.top()
+                            + " " + rect.width() + "x" + rect.height();
+                } catch (Throwable ignored) {
+                    // 没有矩形
+                }
+                log("  控件 " + child.getClass().getSimpleName() + " \"" + message + "\"" + bounds
+                        + " visible=" + readFieldQuietly(child, "visible")
+                        + " width=" + readFieldQuietly(child, "width")
+                        + " height=" + readFieldQuietly(child, "height"));
+            }
+        } catch (Throwable t) {
+            log("  列出控件失败: " + t);
+        }
+    }
+
+    /** 把中文标签变成安全的文件名片段（截图前缀不能用中文标点/空格） */
+    private static String phaseSlug(String label) {
+        if (label.contains("动画设置")) {
+            return "config";
+        }
+        if (label.contains("渐入")) {
+            return "curve_open";
+        }
+        if (label.contains("渐出")) {
+            return "curve_close";
+        }
+        if (label.contains("排除")) {
+            return "exclude";
+        }
+        return "screen";
+    }
+
     private static void openPanel(Minecraft minecraft) {
         openPanel(minecraft, false);
     }
@@ -844,49 +1069,6 @@ public final class VisualTestDriver {
             extractor.fill(cx - 60, cy - 30, cx + 60, cy + 30, 0xFF3AA76D);     // 槽内物品
             extractor.text(Minecraft.getInstance().font, "UI TRANSITIONS", cx - 78, cy - 4, 0xFFFFFFFF);
         }
-    }
-
-    // ================================================================== 新增：配置界面的曲线编辑器入口
-
-    /**
-     * 在配置界面里找到"打开曲线编辑器"那个自绘条目，替用户点一下，看它到底开不开。
-     *
-     * 用户反馈过这个入口"点了没反应"，而它在截图上看起来完全正常 ——
-     * 这种只有交互才暴露的问题，必须真的派发一次点击才测得出来。
-     */
-    private static void clickCurveEditorEntry(Minecraft minecraft) {
-        minecraft.execute(() -> {
-            try {
-                Screen screen = minecraft.gui.screen();
-                if (screen == null) {
-                    log("没有界面可点");
-                    return;
-                }
-                Object entry = findWidget(screen, "CurveEditorEntry");
-                if (entry == null) {
-                    log("在配置界面里没找到 CurveEditorEntry（条目没被建出来？）");
-                    return;
-                }
-                log("找到曲线编辑器条目: " + entry.getClass().getName());
-                java.lang.reflect.Method clicked = entry.getClass().getMethod(
-                        "mouseClicked", net.minecraft.client.input.MouseButtonEvent.class, boolean.class);
-                // 条目是私有内部类：方法本身是 public，但类对外不可见，反射必须先开权限
-                clicked.setAccessible(true);
-                net.minecraft.client.input.MouseButtonInfo info =
-                        new net.minecraft.client.input.MouseButtonInfo(0, 0);
-                // 坐标随便给：这个条目不看坐标，只要左键就开
-                Object event = new net.minecraft.client.input.MouseButtonEvent(0.0, 0.0, info);
-                Object result = clicked.invoke(entry, event, false);
-                log("mouseClicked 返回 " + result);
-            } catch (Throwable t) {
-                log("点击曲线编辑器条目失败: " + t);
-                Throwable cause = t.getCause();
-                while (cause != null) {
-                    log("  根因: " + cause);
-                    cause = cause.getCause();
-                }
-            }
-        });
     }
 
     // ================================================================== 曲线编辑器交互检查
@@ -1075,31 +1257,32 @@ public final class VisualTestDriver {
      */
     private static boolean clickCurveModeButton(Screen screen) {
         try {
-            int graphX = readIntField(screen, "graphX");
-            int graphSize = readIntField(screen, "graphSize");
-            int y = readIntField(screen, "height") - 24;
-            // 与 buildButtons 里的算法保持一致：宽度按可用空间算，缩到 52 为止
-            int buttonWidth = Math.max(52, Math.min(96, (screen.width - 16 * 2 - 8 * 3) / 4));
-            double x = graphX + buttonWidth + 8 + buttonWidth / 2.0;
-            double centerY = y + 10;
-            // 先确认这个坐标上真的是那个按钮，而不是别的控件
-            Object hit = findWidgetByMessage(screen, "多点");
+            // 按**翻译键**找，因为按钮文字是 Component.translatable，
+            // toString() 是 `translation{key='…'}`、永远不含中文 ——
+            // 早先按「多点」/「控制点」两个字去找，两个都找不到，只能退回到"按布局算坐标"，
+            // 于是这个检查其实一直没在验证"按钮的文字/位置对不对"，只是碰巧点中了。
+            // 标签会随模式切换（to_multi / to_bezier 二选一），所以两个键都要试。
+            Object hit = findWidgetByTranslationKey(screen, "ui_transitions.curve.mode.to_multi");
             if (hit == null) {
-                hit = findWidgetByMessage(screen, "控制点");
+                hit = findWidgetByTranslationKey(screen, "ui_transitions.curve.mode.to_bezier");
             }
-            if (hit != null) {
-                net.minecraft.client.gui.navigation.ScreenRectangle bounds =
-                        (net.minecraft.client.gui.navigation.ScreenRectangle)
-                                hit.getClass().getMethod("getRectangle").invoke(hit);
-                x = bounds.left() + bounds.width() / 2.0;
-                centerY = bounds.top() + bounds.height() / 2.0;
-                log("模式按钮位置 " + bounds.left() + "," + bounds.top()
-                        + " 尺寸 " + bounds.width() + "x" + bounds.height()
-                        + " active=" + hit.getClass().getField("active").get(hit));
-            } else {
-                log("按文字没找到模式按钮，改用按布局算出的坐标 (" + (int) x + "," + (int) centerY + ")");
+            if (hit == null) {
+                log("❌ 找不到多点/控制点模式按钮（按钮没建出来？）");
+                dumpWidgets(screen);
+                return false;
             }
-            click(screen, x, centerY);
+            net.minecraft.client.gui.navigation.ScreenRectangle bounds =
+                    (net.minecraft.client.gui.navigation.ScreenRectangle)
+                            hit.getClass().getMethod("getRectangle").invoke(hit);
+            boolean active = (Boolean) hit.getClass().getField("active").get(hit);
+            log("模式按钮位置 " + bounds.left() + "," + bounds.top()
+                    + " 尺寸 " + bounds.width() + "x" + bounds.height() + " active=" + active);
+            if (!active) {
+                log("❌ 模式按钮是灰的（own=false 时不该继续测加点）");
+                return false;
+            }
+            click(screen, bounds.left() + bounds.width() / 2.0,
+                    bounds.top() + bounds.height() / 2.0);
             return true;
         } catch (Throwable t) {
             log("点模式按钮失败: " + t);
@@ -1121,7 +1304,8 @@ public final class VisualTestDriver {
     }
 
     /** 多点模式下的总点数（含固定的首尾） */
-    private static int countMulti(Screen screen) {        Object multi = readObjectField(screen, "multi");
+    private static int countMulti(Screen screen) {
+        Object multi = readObjectField(screen, "multi");
         return multi instanceof float[] ? ((float[]) multi).length / 2 + 2 : -1;
     }
 
@@ -1132,37 +1316,6 @@ public final class VisualTestDriver {
         } catch (Throwable t) {
             log("派发 Delete 失败: " + t);
         }
-    }
-
-    private static Object findWidgetByMessage(Object root, String text) {
-        if (root == null) {
-            return null;
-        }
-        try {
-            java.lang.reflect.Method getMessage = root.getClass().getMethod("getMessage");
-            Object message = getMessage.invoke(root);
-            if (message instanceof Component && ((Component) message).getString().contains(text)) {
-                return root;
-            }
-        } catch (Throwable ignored) {
-            // 不是控件就继续往下找
-        }
-        java.util.List<?> children;
-        try {
-            children = (java.util.List<?>) root.getClass().getMethod("children").invoke(root);
-        } catch (Throwable t) {
-            return null;
-        }
-        if (children == null) {
-            return null;
-        }
-        for (Object child : children) {
-            Object found = findWidgetByMessage(child, text);
-            if (found != null) {
-                return found;
-            }
-        }
-        return null;
     }
 
     /** 派发一次左键点击（走界面自己的 mouseClicked，与真实鼠标同一条路径） */

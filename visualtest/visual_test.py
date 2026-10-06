@@ -23,6 +23,7 @@
 --------
     panels     合成面板的开/关动画（默认基线，含字幕探针）
     config     Cloth 图形化配置界面
+    hub        入口页四个按钮能不能把各自的界面打开（真派发点击）
     curve      曲线编辑器（渐入 / 渐出两页）
     curveui    曲线编辑器的交互：点动画列表、切多点模式、加点/删点、核对布局宽度
     world      只进世界并抓一张
@@ -65,7 +66,7 @@ JAR = os.path.join(JDK, "bin", "jar.exe")
 PHASES = {
     "panels": "合成面板的开/关动画（基线，含字幕探针）",
     "config": "Cloth 图形化配置界面",
-    "configclick": "配置界面里「打开曲线编辑器」入口能不能点开",
+    "hub": "入口页四个按钮能不能把各自的界面打开（用户抱怨过点了没反应）",
     "curve": "曲线编辑器（渐入 / 渐出）",
     "curveui": "曲线编辑器的交互：动画列表 / 多点加点删点 / 布局宽度核对",
     "world": "只进世界并抓一张",
@@ -277,17 +278,30 @@ def summarize(phases):
         size = sum(os.path.getsize(os.path.join(OUT_DIR, f)) for f in files)
         print("    %-22s %2d 张  %6.1f KB   例: %s" % (prefix, len(files), size / 1024.0, files[0]))
 
-    # 从日志里挑出失败与关键结论，省得人工翻
+    # 从日志里挑出失败与关键结论，省得人工翻。
+    #
+    # 除了"失败/警告/根因"这些**词**，还要认驱动打出来的 ❌ **符号**：
+    # 驱动里大量检查是"打到日志里的判定结论"（`点第 3 行：部位 -> ITEMS ✅`），
+    # 它们不带"失败"二字。只按词筛的话，一次已经失败的运行会被汇总成
+    # "（没有失败/警告）" —— 这一轮就真的这么发生过：configclick 明明 ❌ 了，
+    # 汇总却说一切正常，全靠去看截图文件名才发现。
     if os.path.isfile(LOG_PATH):
         interesting = []
+        checked = 0
         with open(LOG_PATH, encoding="utf-8", errors="replace") as fh:
             for line in fh:
-                if "[VisualTest]" in line and ("失败" in line or "警告" in line or "根因" in line):
+                if "[VisualTest]" not in line:
+                    continue
+                if "✅" in line or "❌" in line:
+                    checked += 1
+                if "失败" in line or "警告" in line or "根因" in line or "❌" in line:
                     interesting.append(line.strip())
         print("\n  测试日志里值得注意的行:")
+        if checked:
+            print("    （驱动共做出 %d 条带结论的检查）" % checked)
         if interesting:
             for line in interesting[:25]:
-                print("    " + line)
+                print("    %s" % line)
         else:
             print("    （没有失败/警告）")
 

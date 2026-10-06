@@ -42,7 +42,12 @@ public final class UiTransitionsExclusionsScreen extends Screen {
     private static final int GAP = 12;
     private static final int HEADER_TOP = 34;
     private static final int BOTTOM_BAR = 30;
-    private static final int MIN_LIST_WIDTH = 120;
+    /**
+     * 列表控件的**初始**宽度。真正上屏的宽度由 {@link #layoutLists()} 按窗口算，
+     * 这里只是个占位 —— 名字不能叫 MIN_*，否则下一个人会以为它是个不能突破的下界
+     * （那正是把左列表压成 16 像素的原因）。
+     */
+    private static final int INITIAL_LIST_WIDTH = 120;
 
     private static final int COLOR_TEXT = 0xFFE0E0E0;
     private static final int COLOR_HINT = 0xFF9AA0A6;
@@ -70,12 +75,12 @@ public final class UiTransitionsExclusionsScreen extends Screen {
 
     @Override
     protected void init() {
-        this.seenList = new StackedTextList(0, 0, MIN_LIST_WIDTH, 60,
+        this.seenList = new StackedTextList(0, 0, INITIAL_LIST_WIDTH, 60,
                 Component.translatable("ui_transitions.exclude.seen.title"),
                 Component.translatable("ui_transitions.exclude.seen.hint"),
                 Component.translatable("ui_transitions.exclude.seen.empty"),
                 this.font, index -> exclude(this.seen.get(index)));
-        this.excludedList = new StackedTextList(0, 0, MIN_LIST_WIDTH, 60,
+        this.excludedList = new StackedTextList(0, 0, INITIAL_LIST_WIDTH, 60,
                 Component.translatable("ui_transitions.exclude.excluded.title"),
                 Component.translatable("ui_transitions.exclude.excluded.hint"),
                 Component.translatable("ui_transitions.exclude.excluded.empty"),
@@ -93,18 +98,60 @@ public final class UiTransitionsExclusionsScreen extends Screen {
 
         layoutLists();
         refresh();
+        logGeometry();
     }
 
-    /** 两个列表等宽平分；窗口太窄时各自退到最小宽度 */
+    /**
+     * 两个列表等宽平分。
+     *
+     * **宽度不能被一个"最小宽度"下界顶穿**：早期写法是 `max(MIN_LIST_WIDTH, available/2)`，
+     * 一旦这个下界比实际可用空间还大，左列表就会被推到屏幕外、或被压成一条缝 ——
+     * 实测（427x240）出现过左列表宽度只剩 **16 像素**、看起来"根本没画出来"。
+     * 下界只能防"太窄不好点"，不能反过来制造溢出。
+     */
     private void layoutLists() {
         int available = this.width - MARGIN * 2 - GAP;
-        int each = Math.max(MIN_LIST_WIDTH, available / 2);
-        int left = MARGIN;
-        int right = left + each + GAP;
-        int listY = HEADER_TOP;
-        int listHeight = Math.max(60, this.height - BOTTOM_BAR - listY - 10);
-        this.seenList.layout(left, listY, each, listHeight);
-        this.excludedList.layout(right, listY, each, listHeight);
+        int each = Math.max(80, available / 2);
+        int right = MARGIN + each + GAP;
+        if (right + each > this.width - MARGIN) {
+            // 极窄窗口：一起缩，宁可窄到不好点，也不要错位到看不见
+            each = Math.max(60, (this.width - MARGIN * 2 - GAP) / 2);
+            right = MARGIN + each + GAP;
+        }
+        // 底部要同时容纳两个按钮、状态行与回显行，列表高度必须让位，
+        // 否则状态文字会压在列表边框上（截图里就是这样）
+        int listHeight = Math.max(48, this.height - BOTTOM_BAR - HEADER_TOP - 26);
+        // 底部还要放状态行 + 回显行（各一行字高），列表必须再让出这两行的高度，
+        // 否则状态文字会压在列表边框上
+        listHeight = Math.max(48, listHeight - (this.font.lineHeight + 2) * 2);
+        this.seenList.layout(MARGIN, HEADER_TOP, each, listHeight);
+        this.excludedList.layout(right, HEADER_TOP, each, listHeight);
+    }
+
+    /**
+     * 窗口尺寸变了要重排。
+     *
+     * 界面刚被创建时 `this.width/height` 可能还是上一屏的尺寸（创建与上屏不是同一刻），
+     * 只靠 init() 里算一次，列表就会按**错的宽度**摆好、再也不动 ——
+     * 表现成"左边那个列表根本没画出来"。原版在 resize 时会重新调 init()，
+     * 这里补一次重排，代价可忽略。
+     */
+    @Override
+    public void resize(int width, int height) {
+        super.resize(width, height);
+        if (this.seenList != null && this.excludedList != null) {
+            layoutLists();
+            logGeometry();
+        }
+    }
+
+    /** 把实际算出来的几何打一行日志：这类"看着没画出来"的问题，数字比截图好判 */
+    private void logGeometry() {
+        System.out.println("[UI Transitions] 排除界面几何: 界面=" + this.width + "x" + this.height
+                + " 左列表=" + this.seenList.getX() + "," + this.seenList.getY()
+                + " " + this.seenList.getWidth() + "x" + this.seenList.getHeight()
+                + " 右列表=" + this.excludedList.getX() + "," + this.excludedList.getY()
+                + " " + this.excludedList.getWidth() + "x" + this.excludedList.getHeight());
     }
 
     // ------------------------------------------------------------------ 数据
@@ -223,11 +270,19 @@ public final class UiTransitionsExclusionsScreen extends Screen {
                 Component.translatable("ui_transitions.exclude.hint"),
                 this.width / 2, 22, COLOR_HINT);
 
+        // 底部三样东西从下往上排：按钮（height-24 起，高 20）→ 回显行 → 状态行。
+        // 每一行都要与上面那条隔开，不能写死一个"大概"的 y ——
+        // 实测 427x240 时状态行（height-40）正好压在列表边框与按钮上，
+        // 三行文字糊成一片（截图里就是这样）。
+        int lineHeight = this.font.lineHeight + 2;
+        int echoY = this.height - BOTTOM_BAR - lineHeight;
+        int statusY = echoY - lineHeight;
+
         // 当前进度：左边还剩几个、右边排了几个、有几个被前缀规则一并盖住了。
         // 这一行是这个界面的"唯一真相"：右边列表本身也可能被滚走，看不到全貌时至少这里对得上。
         String status = Component.translatable("ui_transitions.exclude.status",
                 this.seen.size(), this.excluded.size(), this.hiddenByRules).getString();
-        extractor.centeredText(this.font, status, this.width / 2, this.height - 40, COLOR_HINT);
+        extractor.centeredText(this.font, status, this.width / 2, statusY, COLOR_HINT);
 
         if (!this.lastAction.isEmpty()
                 && (System.nanoTime() - this.lastActionNanos) / 1_000_000L < 2500L) {
@@ -235,7 +290,7 @@ public final class UiTransitionsExclusionsScreen extends Screen {
             // 没有这一行的话，用户很难确认"我点的那一下到底生效了没有"
             extractor.centeredText(this.font,
                     Component.translatable("ui_transitions.exclude.did", this.lastAction),
-                    this.width / 2, this.height - 52, 0xFF6FD08C);
+                    this.width / 2, echoY, 0xFF6FD08C);
         }
     }
 }
