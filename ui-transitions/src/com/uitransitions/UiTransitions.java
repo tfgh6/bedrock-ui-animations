@@ -947,6 +947,10 @@ public final class UiTransitions {
     private static volatile long veilStartNanos;
     private static volatile long veilDurationNanos;
     private static volatile boolean veilActive;
+    /** 这一轮遮罩最早是什么时候开始的：用来兜底，防止界面反复创建把遮罩一直顶住 */
+    private static volatile long veilFirstStartNanos;
+    /** 遮罩最长持续这么久，超过就强制放开 —— 宁可少淡一下，也不能一直挡着画面 */
+    private static final long VEIL_MAX_ACTIVE_MS = 5000L;
 
     /** 在跨维度加载界面出现/消失时调用：把遮罩拉满，然后交给它自己淡出 */
     public static void startPortalVeil(Screen screen) {
@@ -954,7 +958,19 @@ public final class UiTransitions {
             if (!TransitionConfig.enabled()) {
                 return;
             }
-            veilStartNanos = System.nanoTime();
+            long now = System.nanoTime();
+            if (!veilActive) {
+                veilFirstStartNanos = now;
+            } else if ((now - veilFirstStartNanos) / 1_000_000L > VEIL_MAX_ACTIVE_MS) {
+                // 兜底：26.3 换维度期间会反复创建/销毁那个界面，每次都会把遮罩重新拉满。
+                // 万一这阵子拖得很长，遮罩就会一直黑着 —— 到期直接放开。
+                if (veilActive) {
+                    veilActive = false;
+                    log("跨维度遮罩超过 " + (VEIL_MAX_ACTIVE_MS / 1000) + " 秒，强制结束（避免一直挡着画面）");
+                }
+                return;
+            }
+            veilStartNanos = now;
             veilDurationNanos = millisToNanos(TransitionConfig.portalDurationMs(), durationFallback());
             if (!veilActive) {
                 log("跨维度过渡遮罩启动: " + (screen == null ? "(无)"
@@ -972,10 +988,15 @@ public final class UiTransitions {
         if (!veilActive) {
             return 0.0F;
         }
-        long elapsed = System.nanoTime() - veilStartNanos;
+        long now = System.nanoTime();
+        long elapsed = now - veilStartNanos;
+        boolean tooLong = (now - veilFirstStartNanos) / 1_000_000L > VEIL_MAX_ACTIVE_MS;
         // 时长为 0 表示"不要这个效果"：直接当作没有遮罩（下限已经放开到 0）
-        if (veilDurationNanos <= 0L || elapsed >= veilDurationNanos) {
+        if (veilDurationNanos <= 0L || elapsed >= veilDurationNanos || tooLong) {
             veilActive = false;
+            if (tooLong) {
+                log("跨维度遮罩结束（超时兜底）");
+            }
             return 0.0F;
         }
         float p = elapsed / (float) veilDurationNanos;
@@ -1024,6 +1045,9 @@ public final class UiTransitions {
                 return;
             }
             int a = Math.max(0, Math.min(255, Math.round(alpha * 255.0F)));
+            // 先清掉可能残留的裁剪区：界面画到最后常常还开着 scissor，
+            // 全屏填充被它一裁就只剩中间一块方框 —— 动画结束后看着就像"有个框还在那儿"
+            extractor.disableScissor();
             extractor.fill(0, 0, extractor.guiWidth(), extractor.guiHeight(), a << 24);
         } catch (Throwable t) {
             report("drawPortalVeil", t);

@@ -231,11 +231,13 @@ public final class UiTransitionsCurveScreen extends Screen {
 
         drawCurve(extractor);
 
-        // 控制点连线
-        extractor.fill(toScreenX(0.0F), toScreenY(0.0F), toScreenX(this.points[0]), toScreenY(this.points[1]),
-                COLOR_HANDLE_LINE);
-        extractor.fill(toScreenX(1.0F), toScreenY(1.0F), toScreenX(this.points[2]), toScreenY(this.points[3]),
-                COLOR_HANDLE_LINE);
+        // 控制点连线：必须画**线段**。
+        // 早先这里写成 fill(x0, y0, px, py, 色) —— 那是画矩形不是画线，
+        // 控制点一旦拉远，整块矩形就把曲线盖住了（用户截图里那块黄色就是它）。
+        drawSegment(extractor, toScreenX(0.0F), toScreenY(0.0F),
+                toScreenX(this.points[0]), toScreenY(this.points[1]), COLOR_HANDLE_LINE);
+        drawSegment(extractor, toScreenX(this.points[2]), toScreenY(this.points[3]),
+                toScreenX(1.0F), toScreenY(1.0F), COLOR_HANDLE_LINE);
 
         drawHandle(extractor, this.points[0], this.points[1],
                 this.dragging == 1 || isNear(mouseX, mouseY, this.points[0], this.points[1]));
@@ -288,6 +290,27 @@ public final class UiTransitionsCurveScreen extends Screen {
 
     private boolean isNear(double mouseX, double mouseY, float cx, float cy) {
         return distance(mouseX, mouseY, cx, cy) <= GRAB_DISTANCE;
+    }
+
+    /**
+     * 画一条 1 像素宽的线段（逐点填充）。
+     *
+     * 注意 fill(x0, y0, x1, y1) 画的是**矩形**，不是两点之间的连线 ——
+     * 拿它当连线用，两点一拉远就会糊掉一大片。
+     */
+    private void drawSegment(GuiGraphicsExtractor extractor, int x0, int y0, int x1, int y1, int color) {
+        int dx = x1 - x0;
+        int dy = y1 - y0;
+        int steps = Math.max(Math.abs(dx), Math.abs(dy));
+        if (steps <= 0) {
+            extractor.fill(x0, y0, x0 + 1, y0 + 1, color);
+            return;
+        }
+        for (int i = 0; i <= steps; i++) {
+            int x = x0 + Math.round(dx * (i / (float) steps));
+            int y = y0 + Math.round(dy * (i / (float) steps));
+            extractor.fill(x, y, x + 1, y + 1, color);
+        }
     }
 
     private void drawHandle(GuiGraphicsExtractor extractor, float cx, float cy, boolean highlighted) {

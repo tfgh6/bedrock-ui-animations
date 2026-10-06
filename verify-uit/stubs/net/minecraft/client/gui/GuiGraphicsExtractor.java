@@ -29,4 +29,17 @@ public class GuiGraphicsExtractor {
     public void outline(int x, int y, int width, int height, int color) {
         this.lastFillColor = color;
     }
+
+    public boolean scissorEnabled;
+    public int scissorDisables;
+
+    public void enableScissor(int x0, int y0, int x1, int y1) {
+        this.scissorEnabled = true;
+    }
+
+    /** 跨维度遮罩画之前会先清掉残留裁剪区，否则全屏填充会被裁成一块方框 */
+    public void disableScissor() {
+        this.scissorEnabled = false;
+        this.scissorDisables++;
+    }
 }
