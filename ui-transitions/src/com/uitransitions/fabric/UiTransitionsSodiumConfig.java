@@ -97,11 +97,11 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         anim.addOption(intOption(builder, "duration_ms", TransitionConfig.DEFAULT_DURATION_MS,
                 TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS, 10,
                 TransitionConfig::setDurationMsBoth,
-                value -> tr(value + " 毫秒")));
+                value -> Component.translatable("ui_transitions.unit.ms", value)));
 
         anim.addOption(intOption(builder, "offset", Math.round(TransitionConfig.DEFAULT_OFFSET), 0, 400, 1,
                 value -> TransitionConfig.setOffset(value),
-                value -> tr(value + " 像素")));
+                value -> Component.translatable("ui_transitions.unit.px", value)));
 
         anim.addOption(intOption(builder, "jelly", 0, 0, 100, 5,
                 value -> TransitionConfig.setJelly(value / 100.0F),
@@ -122,17 +122,17 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         layers.addOption(intOption(builder, "tab_switch_ms", TransitionConfig.DEFAULT_TAB_SWITCH_MS,
                 TransitionConfig.MIN_TAB_SWITCH_MS, TransitionConfig.MAX_TAB_SWITCH_MS, 10,
                 TransitionConfig::setTabSwitchMs,
-                value -> tr(value + " 毫秒")));
+                value -> Component.translatable("ui_transitions.unit.ms", value)));
         layers.addOption(intOption(builder, "scroll_fade_band", 200, 16, 300, 2,
                 TransitionConfig::setScrollFadeBand,
-                value -> tr(value + " 像素")));
+                value -> Component.translatable("ui_transitions.unit.px", value)));
         layers.addOption(intOption(builder, "scroll_fade_min", 0, 0, 100, 5,
                 TransitionConfig::setScrollFadeMin,
                 value -> tr(value + "%")));
         layers.addOption(intOption(builder, "portal_duration_ms", TransitionConfig.DEFAULT_PORTAL_DURATION_MS,
                 TransitionConfig.MIN_PORTAL_DURATION_MS, TransitionConfig.MAX_PORTAL_DURATION_MS, 50,
                 TransitionConfig::setPortalDurationMs,
-                value -> tr(value + " 毫秒")));
+                value -> Component.translatable("ui_transitions.unit.ms", value)));
         
         // 默认值与 TransitionConfig.animateSameTypeSwitch 一致：默认是**做**动画的
         layers.addOption(bool(builder, "animate_same_type_switch", true,

@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "id": "ui_transitions",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "name": "Bedrock UI Animations",
-  "description": "Bedrock-style slide + fade transitions for container and menu UIs, with per-layer toggles",
+  "description": "Bedrock-style slide + fade transitions for container and menu UIs, with per-layer toggles. Client-side only. / 为容器与菜单界面添加基岩版风格的滑入滑出与淡入淡出过渡动画，含逐层开关。纯客户端。",
   "authors": [
     "KurumiのZaphkiel",
     "JiaWang-sama"

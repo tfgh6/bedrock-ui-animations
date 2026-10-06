@@ -244,19 +244,19 @@ public final class UiTransitionsCurveScreen extends Screen {
         drawHandle(extractor, this.points[2], this.points[3],
                 this.dragging == 2 || isNear(mouseX, mouseY, this.points[2], this.points[3]));
 
-        String state;
+        Component state;
         if (this.dragging == 1) {
-            state = "正在调整 P1";
+            state = Component.translatable("ui_transitions.curve.dragging_p1");
         } else if (this.dragging == 2) {
-            state = "正在调整 P2";
+            state = Component.translatable("ui_transitions.curve.dragging_p2");
         } else {
-            state = "P1 / P2 也可以点图挪动";
+            state = Component.translatable("ui_transitions.curve.drag_hint");
         }
         extractor.text(this.font,
                 String.format(Locale.ROOT, "P1 %.2f,%.2f  P2 %.2f,%.2f",
                         this.points[0], this.points[1], this.points[2], this.points[3]),
                 x0, y1 + 3, COLOR_TEXT);
-        extractor.text(this.font, Component.literal(state), x0, y1 + 14,
+        extractor.text(this.font, state, x0, y1 + 14,
                 this.dragging != 0 ? COLOR_HANDLE : COLOR_HINT);
     }
 

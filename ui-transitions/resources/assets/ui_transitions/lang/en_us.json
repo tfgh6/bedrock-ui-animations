@@ -157,5 +157,17 @@
   "ui_transitions.hub.config": "Screen animation settings",
   "ui_transitions.hub.curve_open": "Curve editor — opening",
   "ui_transitions.hub.curve_close": "Curve editor — closing",
-  "ui_transitions.hub.hint": "In the curve editor you can drag the control points; the preview on the right demonstrates both the opening and closing transitions."
+  "ui_transitions.hub.hint": "In the curve editor you can drag the control points; the preview on the right demonstrates both the opening and closing transitions.",
+  "ui_transitions.unit.ms": "%d ms",
+  "ui_transitions.unit.px": "%d px",
+  "ui_transitions.config.portal_scope": "Covers LevelLoadingScreen (the \"building terrain\" screen in 26.3, used both when first entering a world and when changing dimension) and ProgressScreen.",
+  "ui_transitions.config.seen_screens.header": "Recently seen screens (copy them above):",
+  "ui_transitions.config.seen_screens.empty": "(nothing recorded yet — open a few screens and come back)",
+  "ui_transitions.config.seen_screens.more": "… %d total",
+  "ui_transitions.config.seen_screens.tip": "Note: only animated screens show up here. Open a screen, come back, and it will be recorded.",
+  "ui_transitions.config.saved_tip": "Note: every option is written to config/ui-transitions.properties and saved immediately.",
+  "ui_transitions.config.curve_error": "Valid values: %s",
+  "ui_transitions.curve.dragging_p1": "Adjusting P1",
+  "ui_transitions.curve.dragging_p2": "Adjusting P2",
+  "ui_transitions.curve.drag_hint": "You can also click the graph to move P1 / P2"
 }

@@ -157,5 +157,17 @@
   "ui_transitions.hub.config": "界面动画设置",
   "ui_transitions.hub.curve_open": "曲线编辑器 — 渐入（打开界面）",
   "ui_transitions.hub.curve_close": "曲线编辑器 — 渐出（关闭界面）",
-  "ui_transitions.hub.hint": "曲线编辑器里可以直接拖动控制点，右边会示范渐入与渐出的效果"
+  "ui_transitions.hub.hint": "曲线编辑器里可以直接拖动控制点，右边会示范渐入与渐出的效果",
+  "ui_transitions.unit.ms": "%d 毫秒",
+  "ui_transitions.unit.px": "%d 像素",
+  "ui_transitions.config.portal_scope": "覆盖的界面：LevelLoadingScreen（26.3 里「正在下载地形」就是它，\n首次进世界与维度切换都走这个界面）以及 ProgressScreen。",
+  "ui_transitions.config.seen_screens.header": "最近见过的界面（可直接复制到上面）：",
+  "ui_transitions.config.seen_screens.empty": "（还没记录到：先打开几个界面，再回来这里）",
+  "ui_transitions.config.seen_screens.more": "… 共 %d 个",
+  "ui_transitions.config.seen_screens.tip": "提示：只有装了动画的界面才会出现在这个列表里；打开过某个界面之后回到这里，它就会被记下来。",
+  "ui_transitions.config.saved_tip": "提示：所有选项都会写入 config/ui-transitions.properties，改动立刻保存。",
+  "ui_transitions.config.curve_error": "可用值: %s",
+  "ui_transitions.curve.dragging_p1": "正在调整 P1",
+  "ui_transitions.curve.dragging_p2": "正在调整 P2",
+  "ui_transitions.curve.drag_hint": "P1 / P2 也可以点图挪动"
 }

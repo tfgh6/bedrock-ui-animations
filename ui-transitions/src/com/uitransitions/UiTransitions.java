@@ -70,6 +70,8 @@ public final class UiTransitions {
      */
     private static final ThreadLocal<Float> PIP_SHIFT = ThreadLocal.withInitial(() -> 0.0F);
     private static final ThreadLocal<Boolean> TAB_STATIC = ThreadLocal.withInitial(() -> false);
+    /** 冻住快捷栏时被替换掉的 PIP_FRAME_ALPHA，恢复时还原 */
+    private static final ThreadLocal<Float> TAB_STATIC_SAVED_PIP = ThreadLocal.withInitial(() -> 1.0F);
     /**
      * 物品/画中画走的是预乘 alpha 管线（GUI_TEXTURED_PREMULTIPLIED_ALPHA）：
      * 颜色通道本应已经乘过 alpha。只改 alpha 而不动 RGB，元素就会比周围偏亮
@@ -762,14 +764,24 @@ public final class UiTransitions {
         }
     }
 
-    /** 快捷栏：在换页动画期间保持原版观感（不跟着一起淡） */
+    /**
+     * 快捷栏：在换页动画期间保持原版观感（不跟着一起淡）。
+     *
+     * 注意必须**连 PIP_FRAME_ALPHA 一起冻住**。快捷栏里的物品走的是物品图集那条路：
+     *   · 这里把 WINDOW_ALPHA 置回 1，tagItem 便认为"不用登记"，不会留下登记值；
+     *   · 提交时取不到登记值，就回退到 PIP_FRAME_ALPHA —— 若它还是淡变中的值，
+     *     快捷栏的物品就会跟着一起淡（用户反馈的"点标签时快捷栏也跟着渐变"就是这样，
+     *     是 1.4.0 把兜底从 FRAME_ALPHA 改成 PIP_FRAME_ALPHA 之后出现的回归）。
+     */
     public static void pauseForTabStatic(GuiGraphicsExtractor extractor) {
         try {
             if (FRAME_FADE_ALPHA >= 0.999F || TAB_STATIC.get()) {
                 return;
             }
+            TAB_STATIC_SAVED_PIP.set(PIP_FRAME_ALPHA);
             WINDOW_ALPHA.set(1.0F);
             FRAME_ALPHA.set(1.0F);
+            PIP_FRAME_ALPHA = 1.0F;
             TAB_STATIC.set(true);
         } catch (Throwable t) {
             report("pauseForTabStatic", t);
@@ -781,6 +793,7 @@ public final class UiTransitions {
             if (!TAB_STATIC.get()) {
                 return;
             }
+            PIP_FRAME_ALPHA = TAB_STATIC_SAVED_PIP.get();
             TAB_STATIC.set(false);
         } catch (Throwable t) {
             TAB_STATIC.set(false);

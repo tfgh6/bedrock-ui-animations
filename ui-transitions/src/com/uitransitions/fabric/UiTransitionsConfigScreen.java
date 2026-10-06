@@ -291,9 +291,8 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
         
-        portal.addEntry(entries.startTextDescription(Component.literal(
-                "覆盖的界面：LevelLoadingScreen（26.3 里「正在下载地形」就是它，\n"
-                        + "首次进世界与维度切换都走这个界面）以及 ProgressScreen。")).build());
+        portal.addEntry(entries.startTextDescription(
+                Component.translatable("ui_transitions.config.portal_scope")).build());
 
         // ============================================================ 方向
         ConfigCategory direction = builder.getOrCreateCategory(Component.translatable("ui_transitions.config.category.direction"));
@@ -336,18 +335,15 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
         perScreen.addEntry(entries.startTextDescription(
-                Component.literal("最近见过的界面（可直接复制到上面）：\n"
-                        + seenScreenHint())).build());
+                Component.translatable("ui_transitions.config.seen_screens.header")
+                        .append("\n").append(seenScreenHint())).build());
 
-        perScreen.addEntry(entries.startTextDescription(Component.literal(
-                "提示：只有装了动画的界面才会出现在这个列表里；"
-                        + "打开过某个界面之后回到这里，它就会被记下来。")).build());
+        perScreen.addEntry(entries.startTextDescription(Component.translatable("ui_transitions.config.seen_screens.tip")).build());
 
         // ============================================================ 兼容性
         ConfigCategory compat = builder.getOrCreateCategory(Component.translatable("ui_transitions.config.category.compat"));
 
-        compat.addEntry(entries.startTextDescription(Component.literal(
-                        "提示：所有选项都会写入 config/ui-transitions.properties，改动立刻保存。"))
+        compat.addEntry(entries.startTextDescription(Component.translatable("ui_transitions.config.saved_tip"))
                 .build());
 
         return builder.build();
@@ -359,8 +355,8 @@ public final class UiTransitionsConfigScreen {
         if (TransitionConfig.Curve.byId(value).id().equals(normalized)) {
             return java.util.Optional.empty();
         }
-        return java.util.Optional.of(Component.literal(
-                "可用值: " + String.join(" / ", TransitionConfig.Curve.ids())));
+        return java.util.Optional.of(Component.translatable("ui_transitions.config.curve_error",
+                        String.join(" / ", TransitionConfig.Curve.ids())));
     }
 
 
@@ -401,13 +397,14 @@ public final class UiTransitionsConfigScreen {
     private static String seenScreenHint() {
         java.util.List<String> seen = TransitionConfig.seenScreens();
         if (seen.isEmpty()) {
-            return "（还没记录到：先打开几个界面，再回来这里）";
+            return Component.translatable("ui_transitions.config.seen_screens.empty").getString();
         }
         StringBuilder sb = new StringBuilder();
         int shown = 0;
         for (String name : seen) {
             if (shown >= 14) {
-                sb.append("… 共 ").append(seen.size()).append(" 个");
+                sb.append(Component.translatable("ui_transitions.config.seen_screens.more",
+                        seen.size()).getString());
                 break;
             }
             if (shown > 0) {
