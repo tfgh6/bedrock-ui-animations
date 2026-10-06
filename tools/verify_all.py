@@ -67,6 +67,9 @@ def main():
         ("Mixin 注入目标核对（tools/check_mixins.py）", ["tools/check_mixins.py", "--quiet"]),
         ("状态机断言（tools/run_verify.py）", ["tools/run_verify.py"]),
         ("verify-uit 与模板一致性", ["ui-transitions/gen_verify.py", "--check"]),
+        ("共用代码不得引用加载器专属类（tools/check_shared_code.py）",
+         ["tools/check_shared_code.py", "--quiet"]),
+        ("翻译完整性（tools/check_lang.py）", ["tools/check_lang.py", "--quiet"]),
         ("打包 + 产物纯净性（ui-transitions/build_jar.py）", ["ui-transitions/build_jar.py"]),
     ]
     if args.neoforge:

@@ -24,8 +24,8 @@ public final class UiTransitionsCurveScreen extends Screen {
 
     /** 编辑的是哪一段动画 */
     public enum Target {
-        OPEN("渐入（打开界面）"),
-        CLOSE("渐出（关闭界面）");
+        OPEN("ui_transitions.curve.target.open"),
+        CLOSE("ui_transitions.curve.target.close");
 
         private final String label;
 
@@ -90,7 +90,7 @@ public final class UiTransitionsCurveScreen extends Screen {
     private long startNanos;
 
     public UiTransitionsCurveScreen(Screen parent, Target target) {
-        super(Component.literal("曲线编辑"));
+        super(Component.translatable("ui_transitions.curve.title"));
         this.parent = parent;
         this.target = target;
         // 从当前方向已有的控制点起步，而不是每次都从默认值开始
@@ -127,16 +127,16 @@ public final class UiTransitionsCurveScreen extends Screen {
         int total = buttonWidth * 3 + gap * 2;
         int x = (this.width - total) / 2;
         int y = this.height - 24;
-        addRenderableWidget(Button.builder(Component.literal("重置"), b -> {
+        addRenderableWidget(Button.builder(Component.translatable("ui_transitions.curve.reset"), b -> {
             float[] def = TransitionConfig.parseBezier(TransitionConfig.DEFAULT_CUSTOM_BEZIER);
             this.points = new float[] { def[0], def[1], def[2], def[3] };
             syncSliders();
         }).bounds(x, y, buttonWidth, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("完成"), b -> {
+        addRenderableWidget(Button.builder(Component.translatable("ui_transitions.curve.done"), b -> {
             save();
             this.minecraft.setScreenAndShow(this.parent);
         }).bounds(x + buttonWidth + gap, y, buttonWidth, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("取消"), b ->
+        addRenderableWidget(Button.builder(Component.translatable("ui_transitions.curve.cancel"), b ->
                 this.minecraft.setScreenAndShow(this.parent))
                 .bounds(x + (buttonWidth + gap) * 2, y, buttonWidth, 20).build());
     }
@@ -196,9 +196,9 @@ public final class UiTransitionsCurveScreen extends Screen {
         super.extractRenderState(extractor, mouseX, mouseY, partialTick);
 
         extractor.centeredText(this.font,
-                Component.literal("曲线编辑 —— " + this.target.label()), this.width / 2, 10, COLOR_TEXT);
+                Component.translatable("ui_transitions.curve.title_target", Component.translatable(this.target.label())), this.width / 2, 10, COLOR_TEXT);
         extractor.centeredText(this.font,
-                Component.literal("拖动图上的黄色方块，或用左下角的滑块调整"),
+                Component.translatable("ui_transitions.curve.hint"),
                 this.width / 2, 24, COLOR_HINT);
 
         drawGraph(extractor, mouseX, mouseY);
@@ -371,24 +371,24 @@ public final class UiTransitionsCurveScreen extends Screen {
 
         float alpha;
         float slide;
-        String phaseName;
+        Component phaseName;
         TransitionConfig.Curve openCurve = TransitionConfig.Curve.custom(this.points);
         TransitionConfig.Curve closeCurve = TransitionConfig.Curve.custom(this.points);
         if (phase < openMs) {
             float p = phase / (float) openMs;
             alpha = openCurve.easeOut(p);
             slide = 1.0F - alpha;
-            phaseName = "渐入";
+            phaseName = Component.translatable("ui_transitions.curve.phase.in");
         } else if (phase < openMs + holdMs) {
             alpha = 1.0F;
             slide = 0.0F;
-            phaseName = "保持";
+            phaseName = Component.translatable("ui_transitions.curve.phase.hold");
         } else {
             float p = (phase - openMs - holdMs) / (float) closeMs;
             float closed = closeCurve.easeIn(p);
             alpha = 1.0F - closed;
             slide = closed;
-            phaseName = "渐出";
+            phaseName = Component.translatable("ui_transitions.curve.phase.out");
         }
 
         // 统一交给模组的透明度通道：贴图和方块都会跟着淡
@@ -410,10 +410,10 @@ public final class UiTransitionsCurveScreen extends Screen {
         }
 
         // 文字放在面板**外面**，不再压住画面
-        extractor.text(this.font, Component.literal("预览：打开 / 关闭背包"), x + 4, y + 4, COLOR_TEXT);
+        extractor.text(this.font, Component.translatable("ui_transitions.curve.preview"), x + 4, y + 4, COLOR_TEXT);
         extractor.text(this.font,
-                Component.literal(String.format(Locale.ROOT, "%s   透明度 %d%%   渐入 %dms / 渐出 %dms",
-                        phaseName, Math.round(alpha * 100), openMs, closeMs)),
+                Component.translatable("ui_transitions.curve.preview_info",
+                        phaseName, Math.round(alpha * 100), openMs, closeMs),
                 x + 4, y + h - 12, COLOR_HINT);
     }
 
