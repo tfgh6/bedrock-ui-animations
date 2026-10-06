@@ -619,7 +619,8 @@ public final class UiTransitions {
         if (state == null) {
             return 1.0F;
         }
-        float ms = Math.max(50, TransitionConfig.tabSwitchMs()) * 1_000_000.0F;
+        float ms = Math.max(TransitionConfig.MIN_TAB_SWITCH_MS,
+                TransitionConfig.tabSwitchMs()) * 1_000_000.0F;
         return clamp01((System.nanoTime() - state.startNanos()) / ms);
     }
 
@@ -982,12 +983,20 @@ public final class UiTransitions {
         return base;
     }
 
+    /**
+     * 本段动画的时长（纳秒）。
+     *
+     * 用 TransitionConfig 的上下限常量，而不是在这里另外写死一组数字 ——
+     * 之前这里写的是 1..5000，而配置侧的合法范围是 50..2000，
+     * 两套边界不一致，改配置范围时很容易忘掉这一处。
+     */
     private static long durationNanos() {
         try {
-            int millis = Math.max(1, Math.min(5000, TransitionConfig.durationMs()));
+            int millis = Math.max(TransitionConfig.MIN_DURATION_MS,
+                    Math.min(TransitionConfig.MAX_DURATION_MS, TransitionConfig.durationMs()));
             return millis * 1_000_000L;
         } catch (Throwable t) {
-            return 300L * 1_000_000L;
+            return (long) TransitionConfig.DEFAULT_DURATION_MS * 1_000_000L;
         }
     }
 

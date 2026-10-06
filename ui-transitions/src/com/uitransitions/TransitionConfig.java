@@ -19,13 +19,25 @@ import java.util.Set;
  */
 public final class TransitionConfig {
 
-    public static final int DEFAULT_DURATION_MS = 300;
+    /**
+     * 默认动画时长。
+     *
+     * 300ms 起步太快：缓出曲线在前 100ms 就冲到将近 70% 的不透明度，
+     * 观感上更像"闪一下"而不是"淡入"。500ms 让淡变真正看得出来。
+     */
+    public static final int DEFAULT_DURATION_MS = 500;
     public static final float DEFAULT_OFFSET = 120.0F;
     /** 默认额外适配的界面（物品管理器一类）：按类名/包名前缀匹配 */
     public static final String DEFAULT_EXTRA_SCREENS = "mezz.jei,dev.emi.emi,me.shedaniel.rei";
 
-    private static final int MIN_DURATION_MS = 50;
-    private static final int MAX_DURATION_MS = 2000;
+    public static final int MIN_DURATION_MS = 50;
+    public static final int MAX_DURATION_MS = 5000;
+
+    /** 原地淡变（点分类标签 / 滚动）的默认时长与范围 */
+    public static final int DEFAULT_TAB_SWITCH_MS = 450;
+    public static final int MIN_TAB_SWITCH_MS = 50;
+    public static final int MAX_TAB_SWITCH_MS = 2000;
+
     private static final float MIN_OFFSET = 0.0F;
     private static final float MAX_OFFSET = 400.0F;
 
@@ -51,7 +63,7 @@ public final class TransitionConfig {
     private static volatile boolean allowLookDuringClose = true;
     private static volatile boolean staggerClose = true;
     private static volatile boolean animateTabSwitch = true;
-    private static volatile int tabSwitchMs = 300;
+    private static volatile int tabSwitchMs = DEFAULT_TAB_SWITCH_MS;
     private static volatile int scrollFadeBand = 200;
     private static volatile int scrollFadeMin = 0;
     private static volatile boolean hidePlayerModelOnClose = true;
@@ -305,7 +317,7 @@ public final class TransitionConfig {
         allowLookDuringClose = true;
         staggerClose = true;
         animateTabSwitch = true;
-        tabSwitchMs = 300;
+        tabSwitchMs = DEFAULT_TAB_SWITCH_MS;
         scrollFadeBand = 200;
         scrollFadeMin = 0;
         hidePlayerModelOnClose = true;
@@ -673,7 +685,7 @@ public final class TransitionConfig {
     }
 
     private static int clampTabMs(int value) {
-        return Math.max(50, Math.min(1000, value));
+        return Math.max(MIN_TAB_SWITCH_MS, Math.min(MAX_TAB_SWITCH_MS, value));
     }
 
     private static float clampJelly(float value) {

@@ -199,6 +199,12 @@ public class VerifyTransitions {
         String text = Files.readString(configFile.toPath());
         check("配置含 enabled 键", text.contains("enabled=true"), "enabled=true");
 
+        // 断言里的等待时长依赖动画时长，所以这里显式钉死它，
+        // 免得以后调整默认值（比如 300 -> 500）把断言弄成偶发失败。
+        final int DURATION_MS = 300;
+        TransitionConfig.setDurationMs(DURATION_MS);
+        final long WAIT_MS = DURATION_MS + 150L;        // 留够余量等动画播完
+
         // ---------- 2) 只对容器界面生效 ----------
         check("容器界面参与动画", UiTransitions.shouldAnimate(container), "true");
         check("普通界面默认不参与", !UiTransitions.shouldAnimate(plain), "false");
@@ -222,7 +228,7 @@ public class VerifyTransitions {
         check("结束时弹栈一次", Matrix3x2fStack.popCount == 1, "popCount=" + Matrix3x2fStack.popCount);
 
         // ---------- 4) 动画结束后零介入 ----------
-        Thread.sleep(420);
+        Thread.sleep(WAIT_MS);
         Matrix3x2fStack.reset();
         UiTransitions.beginContentLayer(container, extractor);
         check("动画播完后不再压栈（闲置零开销）", Matrix3x2fStack.pushCount == 0,
@@ -241,7 +247,7 @@ public class VerifyTransitions {
         check("关闭起始位移接近 0", Math.abs(closeShiftStart) < 10.0F, "shift=" + closeShiftStart);
         UiTransitions.endContentLayer(container, extractor);
 
-        Thread.sleep(420);
+        Thread.sleep(WAIT_MS);
         Matrix3x2fStack.reset();
         UiTransitions.beginContentLayer(container, extractor);
         float closeShiftEnd = Matrix3x2fStack.lastTranslateY;

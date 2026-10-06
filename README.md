@@ -71,7 +71,7 @@
 
 ```properties
 enabled=true                  # 总开关
-durationMs=300                # 动画时长（50–2000 毫秒）
+durationMs=500                # 动画时长（50–5000 毫秒）
 offset=120.0                  # 位移距离（像素，0 = 只淡变不位移）
 curve=cubic                   # 缓动曲线
 jelly=0.0                     # 果冻回弹强度（0 = 关闭）
@@ -86,7 +86,7 @@ animateDim=false              # 遮罩是否也位移（默认静止）
 animateSubtitles=false        # 字幕是否参与动画（默认不动）
 staggerClose=true             # 关闭时内容比底板略早淡出
 animateTabSwitch=true         # 分类标签切换时物品区原地淡入
-tabSwitchMs=300               # 原地淡变时长：标签切换与滚动共用（50–1000 毫秒）
+tabSwitchMs=450               # 原地淡变时长：标签切换与滚动共用（50–2000 毫秒）
 scrollFadeBand=200            # 滚动逐格渐变的渐变带高度（16–300 像素）
 scrollFadeMin=0               # 滚动时进入边那一侧的最低透明度（0–100 %，0 = 完全淡出）
 animateSameTypeSwitch=true    # 同类界面换页也做动画（默认做）

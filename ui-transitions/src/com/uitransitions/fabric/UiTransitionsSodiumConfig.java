@@ -86,8 +86,10 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
                         () -> curveIndex(TransitionConfig.curve()))
                 .setStorageHandler(TransitionConfig::save));
 
-        anim.addOption(intOption(builder, "duration_ms", "动画时长", "滑入滑出持续的时间，默认 300 毫秒",
-                TransitionConfig.DEFAULT_DURATION_MS, 50, 2000, 10,
+        anim.addOption(intOption(builder, "duration_ms", "动画时长",
+                "滑入滑出持续的时间；默认 500 毫秒。太短会看起来像闪一下",
+                TransitionConfig.DEFAULT_DURATION_MS,
+                TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS, 10,
                 TransitionConfig::setDurationMs,
                 value -> tr(value + " 毫秒")));
 
@@ -122,8 +124,10 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         layers.addOption(bool(builder, "animate_tab_switch", "分类标签切换动画",
                 "点创造模式物品栏的分类标签时，物品区原地淡入（底板、标签栏、快捷栏都不动）", true,
                 TransitionConfig::setAnimateTabSwitch));
-        layers.addOption(intOption(builder, "tab_switch_ms", "标签切换时长", "换页动画毫秒数，默认 300",
-                300, 50, 1000, 10,
+        layers.addOption(intOption(builder, "tab_switch_ms", "标签切换时长",
+                "点分类标签 / 滚动物品列表时的原地淡变时长；默认 450 毫秒",
+                TransitionConfig.DEFAULT_TAB_SWITCH_MS,
+                TransitionConfig.MIN_TAB_SWITCH_MS, TransitionConfig.MAX_TAB_SWITCH_MS, 10,
                 TransitionConfig::setTabSwitchMs,
                 value -> tr(value + " 毫秒")));
         layers.addOption(intOption(builder, "scroll_fade_band", "滚动渐变带高度",

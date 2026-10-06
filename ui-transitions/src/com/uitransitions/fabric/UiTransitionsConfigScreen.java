@@ -50,9 +50,11 @@ public final class UiTransitionsConfigScreen {
                 .setSaveConsumer(TransitionConfig::setCurveId)
                 .build());
 
-        anim.addEntry(entries.startIntSlider(Component.literal("动画时长（毫秒）"), TransitionConfig.durationMs(), 50, 2000)
+        anim.addEntry(entries.startIntSlider(Component.literal("动画时长（毫秒）"), TransitionConfig.durationMs(),
+                        TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS)
                 .setDefaultValue(TransitionConfig.DEFAULT_DURATION_MS)
-                .setTooltip(Component.literal("滑入/滑出持续的时间，默认 300"))
+                .setTooltip(Component.literal("滑入/滑出持续的时间，默认 500；太短会看起来像闪一下。"),
+                        Component.literal("觉得拖沓就往小调，觉得一闪而过就往大调"))
                 .setSaveConsumer(TransitionConfig::setDurationMs)
                 .build());
 
@@ -166,9 +168,11 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
         layers.addEntry(entries.startIntSlider(Component.literal("标签切换时长（毫秒）"),
-                        TransitionConfig.tabSwitchMs(), 50, 1000)
-                .setDefaultValue(300)
-                .setTooltip(Component.literal("换页动画持续多久，默认 300；调短一些会更利落"))
+                        TransitionConfig.tabSwitchMs(),
+                        TransitionConfig.MIN_TAB_SWITCH_MS, TransitionConfig.MAX_TAB_SWITCH_MS)
+                .setDefaultValue(TransitionConfig.DEFAULT_TAB_SWITCH_MS)
+                .setTooltip(Component.literal("点分类标签 / 滚动物品列表时的原地淡变时长，默认 450。"),
+                        Component.literal("这类淡变没有位移，太短同样会显得一闪而过"))
                 .setSaveConsumer(TransitionConfig::setTabSwitchMs)
                 .build());
 
