@@ -865,9 +865,6 @@ public final class TransitionConfig {
             java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
     private static final java.util.Map<Part, String> PART_CLOSE_CUSTOM =
             java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
-    private static final java.util.Map<Part, Curve> PART_CACHE =
-            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
-
     private static java.util.Map<Part, String> partMap(boolean closing, boolean custom) {
         if (closing) {
             return custom ? PART_CLOSE_CUSTOM : PART_CLOSE_CURVE;
