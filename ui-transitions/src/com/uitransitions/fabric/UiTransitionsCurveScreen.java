@@ -10,14 +10,15 @@ import net.minecraft.network.chat.Component;
 import java.util.Locale;
 
 /**
- * 曲线编辑界面：左边一张可拖拽的三次贝塞尔曲线图，右边是渐入 / 渐出的动画示例。
+ * 曲线编辑界面：左边可拖拽的贝塞尔曲线图，右边是**背包开关动画**的预览。
  *
- * 图上两个控制点可以直接拖 —— 拖动时右边的示例会立刻按新曲线重放，
- * "看到的"和"存下来的"用的是同一段求值代码（{@link TransitionConfig.Curve#bezierEase}），
- * 所以不会出现"预览好看、实机不对"的偏差。
+ * 预览不是抽象色块，而是照着背包界面的样子摆的：底板 + 物品格 + 玩家小模型，
+ * 按真实的渐入/渐出时长与曲线循环播放。这样调出来的手感就是实机的手感。
  *
- * 点「完成」会把这条曲线存到当前方向（渐入或渐出），并把该方向切到 custom；
- * 两个方向各有一份控制点，互不影响。
+ * 图上两个控制点可以直接拖。"看到的"和"存下来的"用的是同一段求值代码
+ * （{@link TransitionConfig.Curve#bezierEase}），不会出现"预览好看、实机不对"。
+ *
+ * 点「完成」会把这条曲线存到当前方向，并把该方向切到 custom。
  */
 public final class UiTransitionsCurveScreen extends Screen {
 
@@ -41,7 +42,7 @@ public final class UiTransitionsCurveScreen extends Screen {
     private static final float VIEW_MIN = -0.5F;
     private static final float VIEW_MAX = 1.5F;
     private static final int HANDLE_RADIUS = 4;
-    private static final int GRAB_DISTANCE = 12;
+    private static final int GRAB_DISTANCE = 14;
 
     private static final int COLOR_BG = 0xFF101418;
     private static final int COLOR_BORDER = 0xFF5A6470;
@@ -50,9 +51,13 @@ public final class UiTransitionsCurveScreen extends Screen {
     private static final int COLOR_CURVE = 0xFF6FD08C;
     private static final int COLOR_HANDLE = 0xFFFFD166;
     private static final int COLOR_HANDLE_LINE = 0xFF7A6A3A;
-    private static final int COLOR_PREVIEW = 0xFFB9C4D0;
     private static final int COLOR_TEXT = 0xFFE0E0E0;
     private static final int COLOR_HINT = 0xFF9AA0A6;
+
+    /** 预览里那块"背包"的配色，尽量贴近原版 */
+    private static final int COLOR_PANEL = 0xFFC6C6C6;
+    private static final int COLOR_SLOT = 0xFF8B8B8B;
+    private static final int COLOR_DOLL = 0xFF6FA8DC;
 
     private final Screen parent;
     private final Target target;
@@ -64,7 +69,9 @@ public final class UiTransitionsCurveScreen extends Screen {
     private int graphY;
     private int graphSize;
     private int previewX;
+    private int previewY;
     private int previewWidth;
+    private int previewHeight;
 
     /** 0 = 无，1 = 第一个控制点，2 = 第二个控制点 */
     private int dragging;
@@ -86,19 +93,22 @@ public final class UiTransitionsCurveScreen extends Screen {
     @Override
     protected void init() {
         this.startNanos = System.nanoTime();
-        int margin = 24;
-        int size = Math.min(170, Math.max(90, Math.min(this.width / 3, this.height - 120)));
+        int margin = 20;
+        int size = Math.min(150, Math.max(80, Math.min(this.width / 3, this.height - 130)));
         this.graphSize = size;
         this.graphX = margin;
-        this.graphY = 44;
-        this.previewX = this.graphX + this.graphSize + 28;
-        this.previewWidth = Math.max(80, this.width - this.previewX - margin);
+        this.graphY = 52;
 
-        int y = this.height - 28;
+        this.previewX = this.graphX + this.graphSize + 24;
+        this.previewY = this.graphY;
+        this.previewWidth = Math.max(120, this.width - this.previewX - margin);
+        this.previewHeight = Math.max(80, this.height - this.previewY - 60);
+
         int buttonWidth = 90;
         int gap = 8;
         int total = buttonWidth * 3 + gap * 2;
         int x = (this.width - total) / 2;
+        int y = this.height - 26;
         addRenderableWidget(Button.builder(Component.literal("重置"), b -> {
             float[] def = TransitionConfig.parseBezier(TransitionConfig.DEFAULT_CUSTOM_BEZIER);
             this.points = new float[] { def[0], def[1], def[2], def[3] };
@@ -108,7 +118,8 @@ public final class UiTransitionsCurveScreen extends Screen {
             this.minecraft.setScreenAndShow(this.parent);
         }).bounds(x + buttonWidth + gap, y, buttonWidth, 20).build());
         addRenderableWidget(Button.builder(Component.literal("取消"), b ->
-                this.minecraft.setScreenAndShow(this.parent)).bounds(x + (buttonWidth + gap) * 2, y, buttonWidth, 20).build());
+                this.minecraft.setScreenAndShow(this.parent))
+                .bounds(x + (buttonWidth + gap) * 2, y, buttonWidth, 20).build());
     }
 
     private void save() {
@@ -130,15 +141,17 @@ public final class UiTransitionsCurveScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor extractor, int mouseX, int mouseY, float partialTick) {
-        // 画之前先让父类把按钮等控件铺好
         super.extractRenderState(extractor, mouseX, mouseY, partialTick);
 
         extractor.centeredText(this.font,
-                Component.literal("曲线编辑 —— " + this.target.label() + "（拖动画布上的圆点）"),
-                this.width / 2, 16, COLOR_TEXT);
+                Component.literal("曲线编辑 —— " + this.target.label()),
+                this.width / 2, 14, COLOR_TEXT);
+        extractor.centeredText(this.font,
+                Component.literal("按住图上的黄色方块拖动即可调整"),
+                this.width / 2, 28, COLOR_HINT);
 
         drawGraph(extractor);
-        drawPreview(extractor, mouseX, mouseY);
+        drawPreview(extractor);
     }
 
     private void drawGraph(GuiGraphicsExtractor extractor) {
@@ -148,11 +161,9 @@ public final class UiTransitionsCurveScreen extends Screen {
         int y1 = y0 + this.graphSize;
 
         extractor.fill(x0, y0, x1, y1, COLOR_BG);
-        // 注意：outline 是 (x, y, 宽, 高)，fill 是 (x0, y0, x1, y1) —— 两者语义不同。
-        // 曾经按 fill 的写法传过 x1,y1，结果边框画成了两倍大（实机截图里一眼可见）。
+        // 注意：outline 是 (x, y, 宽, 高)，fill 是 (x0, y0, x1, y1) —— 两者语义不同
         extractor.outline(x0, y0, this.graphSize, this.graphSize, COLOR_BORDER);
 
-        // 参考网格：0.25 / 0.5 / 0.75
         for (int i = 1; i < 4; i++) {
             int gx = x0 + this.graphSize * i / 4;
             int gy = y0 + this.graphSize * i / 4;
@@ -182,7 +193,6 @@ public final class UiTransitionsCurveScreen extends Screen {
             extractor.fill(px, py, px + 2, py + 2, COLOR_CURVE);
         }
 
-        // 两个可拖拽的控制点
         drawHandle(extractor, this.points[0], this.points[1]);
         drawHandle(extractor, this.points[2], this.points[3]);
 
@@ -217,53 +227,118 @@ public final class UiTransitionsCurveScreen extends Screen {
         return VIEW_MAX - ratio * (VIEW_MAX - VIEW_MIN);
     }
 
-    private void drawPreview(GuiGraphicsExtractor extractor, int mouseX, int mouseY) {
-        int stripHeight = 42;
-        int top = this.graphY;
-        extractor.text(this.font, Component.literal("渐入示例（打开界面）"), this.previewX, top - 12, COLOR_TEXT);
-        drawStrip(extractor, this.previewX, top, this.previewWidth, stripHeight, true);
-        int second = top + stripHeight + 26;
-        extractor.text(this.font, Component.literal("渐出示例（关闭界面）"), this.previewX, second - 12, COLOR_TEXT);
-        drawStrip(extractor, this.previewX, second, this.previewWidth, stripHeight, false);
+    // ------------------------------------------------------------------ 预览：背包开关动画
 
-        int hintY = second + stripHeight + 10;
+    /**
+     * 按**真实配置的时长与曲线**循环播放一次"打开背包 → 停一会儿 → 关闭背包"。
+     *
+     * 用真实时长而不是固定的演示时长：调完曲线想看看"500ms 到底是多快"时，
+     * 这里给的就是实机的节奏。
+     */
+    private void drawPreview(GuiGraphicsExtractor extractor) {
+        int x = this.previewX;
+        int y = this.previewY;
+        int w = this.previewWidth;
+        int h = this.previewHeight;
+
+        extractor.fill(x, y, x + w, y + h, COLOR_BG);
+        extractor.outline(x, y, w, h, COLOR_BORDER);
+        extractor.text(this.font, Component.literal("预览：打开 / 关闭背包"),
+                x + 6, y + 5, COLOR_TEXT);
+
+        int openMs = Math.max(1, TransitionConfig.openDurationMs());
+        int closeMs = Math.max(1, TransitionConfig.closeDurationMs());
+        int holdMs = 550;
+
+        long elapsed = (System.nanoTime() - this.startNanos) / 1_000_000L;
+        int cycle = openMs + holdMs + closeMs;
+        long phase = elapsed % cycle;
+
+        float alpha;
+        float slide;
+        String phaseName;
+        TransitionConfig.Curve openCurve = TransitionConfig.Curve.custom(this.points);
+        TransitionConfig.Curve closeCurve = TransitionConfig.Curve.custom(this.points);
+        if (phase < openMs) {
+            float p = phase / (float) openMs;
+            alpha = openCurve.easeOut(p);
+            slide = 1.0F - alpha;
+            phaseName = "渐入";
+        } else if (phase < openMs + holdMs) {
+            alpha = 1.0F;
+            slide = 0.0F;
+            phaseName = "保持";
+        } else {
+            float p = (phase - openMs - holdMs) / (float) closeMs;
+            float closed = closeCurve.easeIn(p);
+            alpha = 1.0F - closed;
+            slide = closed;
+            phaseName = "渐出";
+        }
+
+        int innerX = x + 8;
+        int innerY = y + 18;
+        int innerW = w - 16;
+        int innerH = h - 40;
+        // 位移按预览区高度缩放，最多走 1/4 屏，够看出方向又不至于跑出框
+        int maxSlide = Math.max(6, innerH / 4);
+        int offset = Math.round(maxSlide * slide);
+        int a = Math.max(0, Math.min(255, Math.round(alpha * 255.0F)));
+
+        drawMockInventory(extractor, innerX, innerY + offset, innerW, innerH, a);
+
         extractor.text(this.font,
-                Component.literal("示例会按当前曲线循环播放；点「完成」后才写入配置。"),
-                this.previewX, hintY, COLOR_HINT);
+                Component.literal(String.format(Locale.ROOT, "%s  透明度 %d%%", phaseName, Math.round(alpha * 100))),
+                x + 6, y + h - 14, COLOR_HINT);
         extractor.text(this.font,
-                Component.literal("需要更长的观感就去配置界面调渐入 / 渐出时长。"),
-                this.previewX, hintY + 12, COLOR_HINT);
+                Component.literal(String.format(Locale.ROOT, "渐入 %dms / 渐出 %dms", openMs, closeMs)),
+                x + 6, y + h - 26, COLOR_HINT);
     }
 
-    /** 一小段"界面"按曲线淡入/淡出，顺带带一点位移，尽量贴近实际观感 */
-    private void drawStrip(GuiGraphicsExtractor extractor, int x, int y, int width, int height, boolean opening) {
-        extractor.fill(x, y, x + width, y + height, COLOR_BG);
-        extractor.outline(x, y, width, height, COLOR_BORDER);   // outline = (x, y, 宽, 高)
+    /** 照背包的样子画一块底板：物品格 + 玩家模型位，整体按 alpha 淡、按 offset 移 */
+    private void drawMockInventory(GuiGraphicsExtractor extractor, int x, int y, int w, int h, int alpha) {
+        if (alpha <= 1) {
+            return;
+        }
+        int panel = withAlpha(COLOR_PANEL, alpha);
+        extractor.fill(x, y, x + w, y + h, panel);
+        extractor.outline(x, y, w, h, withAlpha(COLOR_BORDER, alpha));
 
-        int cycleMs = 1400;
-        long elapsed = (System.nanoTime() - this.startNanos) / 1_000_000L;
-        float t = (elapsed % cycleMs) / (float) cycleMs;
-        // 前 75% 播放，后 25% 停一下，看得清结束状态
-        t = Math.min(1.0F, t / 0.75F);
+        // 玩家小模型的位置（左侧那一块）
+        int dollW = Math.max(12, w / 7);
+        int dollH = Math.max(16, h / 2);
+        extractor.fill(x + 6, y + 6, x + 6 + dollW, y + 6 + dollH, withAlpha(COLOR_DOLL, alpha));
 
-        TransitionConfig.Curve preview = TransitionConfig.Curve.custom(this.points);
-        float alpha = opening ? preview.easeOut(t) : 1.0F - preview.easeIn(t);
+        // 3 x 9 的物品格
+        int gridX = x + 6 + dollW + 8;
+        int cell = Math.max(7, Math.min(14, (w - (gridX - x) - 12) / 9));
+        for (int row = 0; row < 3; row++) {
+            for (int col = 0; col < 9; col++) {
+                int sx = gridX + col * (cell + 1);
+                int sy = y + h / 2 + row * (cell + 1);
+                if (sx + cell > x + w - 4) {
+                    continue;
+                }
+                extractor.fill(sx, sy, sx + cell, sy + cell, withAlpha(COLOR_SLOT, alpha));
+            }
+        }
+    }
 
-        int panelWidth = Math.max(24, width - 60);
-        int panelHeight = 20;
-        int px = x + (width - panelWidth) / 2;
-        int slide = Math.round(10.0F * (1.0F - alpha));
-        int py = y + (height - panelHeight) / 2 + (opening ? slide : -slide);
-
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255.0F)));
-        extractor.fill(px, py, px + panelWidth, py + panelHeight, (a << 24) | (COLOR_PREVIEW & 0x00FFFFFF));
-        // 透明度数值，方便对着调
-        extractor.text(this.font, Component.literal(Math.round(alpha * 100.0F) + "%"),
-                x + 4, y + height - 12, COLOR_HINT);
+    private static int withAlpha(int color, int alpha) {
+        return (Math.max(0, Math.min(255, alpha)) << 24) | (color & 0x00FFFFFF);
     }
 
     // ------------------------------------------------------------------ 拖拽
 
+    /**
+     * 注意这里**不靠 mouseDragged**。
+     *
+     * 26.3 里 AbstractContainerEventHandler 根本没有实现 mouseClicked，
+     * 走的是 GuiEventListener 的接口默认实现；而鼠标移动事件的分发依赖
+     * MouseHandler 的内部状态（按下时屏幕有没有"接手"）。实测下来 mouseDragged
+     * 并不保证送到 —— 表现就是"能点住、但拖不动"。
+     * 所以按住之后改用 mouseMoved 跟踪：它只要界面在最上层就会持续送达。
+     */
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (super.mouseClicked(event, doubleClick)) {
@@ -278,26 +353,28 @@ public final class UiTransitionsCurveScreen extends Screen {
         int second = distance(mx, my, this.points[2], this.points[3]);
         if (first <= GRAB_DISTANCE || second <= GRAB_DISTANCE) {
             this.dragging = first <= second ? 1 : 2;
+            applyDrag(mx, my);
             return true;
         }
         return false;
     }
 
     @Override
+    public void mouseMoved(double mouseX, double mouseY) {
+        if (this.dragging != 0) {
+            applyDrag(mouseX, mouseY);
+            return;
+        }
+        super.mouseMoved(mouseX, mouseY);
+    }
+
+    @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-        if (this.dragging == 0) {
-            return super.mouseDragged(event, dragX, dragY);
+        if (this.dragging != 0) {
+            applyDrag(event.x(), event.y());
+            return true;
         }
-        float cx = Math.max(0.0F, Math.min(1.0F, fromScreenX(event.x())));
-        float cy = Math.max(VIEW_MIN, Math.min(VIEW_MAX, fromScreenY(event.y())));
-        if (this.dragging == 1) {
-            this.points[0] = cx;
-            this.points[1] = cy;
-        } else {
-            this.points[2] = cx;
-            this.points[3] = cy;
-        }
-        return true;
+        return super.mouseDragged(event, dragX, dragY);
     }
 
     @Override
@@ -307,6 +384,19 @@ public final class UiTransitionsCurveScreen extends Screen {
             return true;
         }
         return super.mouseReleased(event);
+    }
+
+    private void applyDrag(double mouseX, double mouseY) {
+        // x 必须夹在 0..1：否则反解参数会失真，曲线会变得不可预期
+        float cx = Math.max(0.0F, Math.min(1.0F, fromScreenX(mouseX)));
+        float cy = Math.max(VIEW_MIN, Math.min(VIEW_MAX, fromScreenY(mouseY)));
+        if (this.dragging == 1) {
+            this.points[0] = cx;
+            this.points[1] = cy;
+        } else if (this.dragging == 2) {
+            this.points[2] = cx;
+            this.points[3] = cy;
+        }
     }
 
     private int distance(double mouseX, double mouseY, float cx, float cy) {

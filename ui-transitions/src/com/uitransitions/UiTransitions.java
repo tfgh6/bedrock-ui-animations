@@ -141,6 +141,11 @@ public final class UiTransitions {
             }
             long now = System.nanoTime();
             Screen current = gui.screen();
+            // 每一次切屏都记一行：排查"某个界面怎么没效果"时，这是唯一能直接看出
+            // "到底有没有走到这里、有没有被判成要做动画"的地方
+            log("切屏: " + (current == null ? "(无)" : current.getClass().getSimpleName())
+                    + " -> " + (target == null ? "(无)" : target.getClass().getSimpleName())
+                    + (target != null && isPortalLoading(target) ? "【跨维度加载界面】" : ""));
             // 同类界面之间的"换页"（创造模式分类标签、配方书翻页等）直接切换，不做动画：
             // 它们本来就是同一个界面的内部操作，滑入滑出会很突兀。
             if (target != null && current != null && target != current
@@ -1022,17 +1027,19 @@ public final class UiTransitions {
      *   new LevelLoadingScreen(levelLoadTracker, reason) → Minecraft.setScreenAndShow(...)
      * 而 setScreenAndShow 内部转调 Gui.setScreen，正是本模组拦截的那个入口。
      *
-     * 这里按**简单类名**匹配而不是全限定名：换个包名、或者将来它被挪个位置都不至于静默失效。
+     * 这里按**关键字**匹配而不是精确类名 —— 精确匹配一旦对不上就是彻底静默失效
+     * （这功能已经因为"以为匹配上了"返工过一次），换包名、改名都不会漏。
      */
     private static boolean isPortalLoading(Screen screen) {
         if (screen == null) {
             return false;
         }
         String simple = screen.getClass().getSimpleName();
-        return "LevelLoadingScreen".equals(simple)
-                || "ProgressScreen".equals(simple)
-                || "GenericWaitingScreen".equals(simple)
-                || "ReceivingLevelScreen".equals(simple);
+        return simple.contains("Loading")
+                || simple.contains("Waiting")
+                || simple.contains("Receiving")
+                || simple.contains("Downloading")
+                || simple.contains("Progress");
     }
 
     /** 读一下 LevelLoadingScreen 的 reason，日志里能看出是哪种传送门（读不到就返回 "?"） */
