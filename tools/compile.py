@@ -99,19 +99,25 @@ public class ModList {
     public boolean isLoaded(String modId) {
         return false;
     }
+
+    public java.util.Optional<ModContainer> getModContainerById(String modId) {
+        return java.util.Optional.empty();
+    }
 }
 """,
-    "net/neoforged/fml/ModLoadingContext.java": """
+    # 旧的 ModLoadingContext 注册方式在 1.20.5 被废弃、之后被移除，
+    # 桩里**故意不再提供**它 —— 免得又写出只能在桩上编译过的代码。
+    "net/neoforged/fml/ModContainer.java": """
 package net.neoforged.fml;
 
-import java.util.function.Supplier;
-
-public class ModLoadingContext {
-    public static ModLoadingContext get() {
-        return new ModLoadingContext();
-    }
-
-    public <T extends IExtensionPoint> void registerExtensionPoint(Class<? extends T> point, Supplier<T> supplier) {
+/**
+ * NeoForge 会往 @Mod 构造器里注入它。
+ *
+ * 注册扩展点必须走这里（ModContainer.registerExtensionPoint），
+ * 旧的 ModLoadingContext.get().registerExtensionPoint(...) 已被移除。
+ */
+public class ModContainer {
+    public <T extends IExtensionPoint> void registerExtensionPoint(Class<? extends T> point, T value) {
     }
 }
 """,
@@ -120,9 +126,12 @@ package net.neoforged.neoforge.client.gui;
 
 import net.minecraft.client.gui.screens.Screen;
 import net.neoforged.fml.IExtensionPoint;
+import net.neoforged.fml.ModContainer;
 
+/** 函数式接口：NeoForge 自带的模组列表会为它显示一个「配置」按钮 */
+@FunctionalInterface
 public interface IConfigScreenFactory extends IExtensionPoint {
-    Screen create(Object modContainer, Screen parent);
+    Screen createScreen(ModContainer container, Screen parent);
 }
 """,
 }

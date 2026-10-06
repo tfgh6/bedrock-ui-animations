@@ -3,27 +3,39 @@ package com.uitransitions.neoforge;
 import com.uitransitions.DependencyCheck;
 import com.uitransitions.fabric.UiTransitionsHubScreen;
 import net.neoforged.api.distmarker.Dist;
+import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.ModList;
-import net.neoforged.fml.ModLoadingContext;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 
 /**
- * NeoForge 侧入口：依赖检查 + 把配置界面注册到「模组列表 → 配置」。
+ * NeoForge 侧入口：依赖检查 + 把配置界面注册到 NeoForge **自带的**模组列表。
  *
- * ## NeoForge 这边为什么要特殊处理
+ * ## 与 Fabric 的差异
  *
- * 1. **mod id 不一样**：Cloth Config 在 Fabric 上是 `cloth-config`（连字符），
- *    在 NeoForge 上是 `cloth_config`（下划线，见它自己的 neoforge.mods.toml）。
- *    两个都要认，否则会把"装了"误判成"没装"。
- * 2. **报错时机不一样**：Fabric 的 depends 会在加载入口之前就拦住；
- *    NeoForge 是先构造 @Mod 类，所以检查要放在构造函数的第一件事，
- *    而且**不能**用 try/catch 把异常吞掉 —— 吞掉就等于又变成静默降级了。
- * 3. **neoforge.mods.toml 里也要同步**：把 cloth_config 标成 required，
- *    这样即使构造函数没跑到，加载器自己也会给出"缺少依赖"的界面。
+ * Fabric 需要额外装 Mod Menu 才有「配置」按钮，所以那边 ModMenu 是硬前置；
+ * NeoForge **自带模组管理界面**，配置入口由加载器提供 —— 这里只要注册
+ * {@link IConfigScreenFactory} 就会出现按钮，不需要任何额外模组。
+ *
+ * ## 为什么用 ModList 查容器，而不是构造器注入
+ *
+ * 注册扩展点必须走 `ModContainer.registerExtensionPoint(...)`：旧的
+ * `ModLoadingContext.get().registerExtensionPoint(...)` 在 1.20.5 就被标记废弃、之后被移除，
+ * 用了它只会抛 NoSuchMethodError，被 try/catch 一吞，表现成"模组装了但配置按钮根本没有"。
+ *
+ * 容器本身则用 ModList 按 mod id 查（而不是往构造器里注入 IEventBus/ModContainer）：
+ * 注入签名在不同 NeoForge 版本上不保证一致，写错就直接构造失败崩游戏；
+ * 查一次则哪个版本都能用，拿不到也只是没有配置按钮，不会连累启动。
+ *
+ * ## mod id 不一样
+ *
+ * Cloth Config 在 Fabric 上是 `cloth-config`（连字符），在 NeoForge 上是 `cloth_config`
+ * （下划线，见它自己的 neoforge.mods.toml）。两个都要认，否则会把"装了"误判成"没装"。
  */
 @Mod(value = "ui_transitions", dist = Dist.CLIENT)
 public final class UiTransitionsNeoForge {
+
+    private static final String MOD_ID = "ui_transitions";
 
     public UiTransitionsNeoForge() {
         // 第一件事就是查依赖：缺了直接抛，让加载器把这段说明显示出来。
@@ -37,14 +49,19 @@ public final class UiTransitionsNeoForge {
         System.out.println("[Bedrock UI Animations] NeoForge 入口：已检测到 Cloth Config");
 
         try {
-            // 注册的工厂延迟加载界面类：真点了配置按钮才会加载，
-            // 万一 Cloth Config 出问题也只是那一次点不开，不会连带崩游戏。
-            ModLoadingContext.get().registerExtensionPoint(IConfigScreenFactory.class,
-                    () -> (IConfigScreenFactory) (modContainer, parent) ->
-                            new UiTransitionsHubScreen(parent));
-            System.out.println("[Bedrock UI Animations] 已注册 NeoForge 配置界面（模组列表里的配置按钮）");
+            ModContainer container = ModList.get().getModContainerById(MOD_ID).orElse(null);
+            if (container == null) {
+                System.err.println("[Bedrock UI Animations] 拿不到自己的 ModContainer，"
+                        + "配置入口未注册（模组列表里不会出现配置按钮）");
+                return;
+            }
+            // 工厂是延迟调用的：真点了配置按钮才会加载界面类。
+            container.registerExtensionPoint(IConfigScreenFactory.class,
+                    (modContainer, parent) -> new UiTransitionsHubScreen(parent));
+            System.out.println("[Bedrock UI Animations] 已注册 NeoForge 配置入口（模组列表里的配置按钮）");
         } catch (Throwable t) {
-            System.err.println("[Bedrock UI Animations] 注册 NeoForge 配置界面失败（不影响游戏）: " + t);
+            // 注册失败不该拦着游戏启动，但必须留下痕迹 —— 否则用户只会看到"没有配置按钮"
+            System.err.println("[Bedrock UI Animations] 注册 NeoForge 配置入口失败: " + t);
             Throwable cause = t.getCause();
             while (cause != null) {
                 System.err.println("[Bedrock UI Animations]   根因: " + cause);
