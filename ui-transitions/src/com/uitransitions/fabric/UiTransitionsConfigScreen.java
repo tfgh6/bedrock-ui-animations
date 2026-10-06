@@ -80,6 +80,20 @@ public final class UiTransitionsConfigScreen {
                 .setSaveConsumer(TransitionConfig::setEnabled)
                 .build());
 
+        anim.addEntry(entries.startIntSlider(Component.literal("位移距离（像素）"),
+                        Math.round(TransitionConfig.offset()), 0, 400)
+                .setDefaultValue(Math.round(TransitionConfig.DEFAULT_OFFSET))
+                .setTooltip(Component.literal("界面滑动多少像素，默认 120；0 = 只淡入淡出、不滑动"))
+                .setSaveConsumer(value -> TransitionConfig.setOffset(value))
+                .build());
+
+        anim.addEntry(entries.startIntSlider(Component.literal("果冻回弹强度（%）"),
+                        Math.round(TransitionConfig.jelly() * 100.0F), 0, 100)
+                .setDefaultValue(0)
+                .setTooltip(Component.literal("打开时冲过静止位置再回落的弹性手感，0 = 关闭（默认）"))
+                .setSaveConsumer(value -> TransitionConfig.setJelly(value / 100.0F))
+                .build());
+
         // 用文本输入而不是下拉菜单：Cloth 的下拉菜单类会引入额外的注解依赖
         anim.addEntry(entries.startStrField(
                         Component.literal("缓动曲线（通用）"), TransitionConfig.curve().id())
@@ -133,6 +147,44 @@ public final class UiTransitionsConfigScreen {
                 .setDefaultValue(true)
                 .setTooltip(Component.literal("关闭动画里物品与文字比底板略早结束淡出，避免出现空格子"))
                 .setSaveConsumer(TransitionConfig::setStaggerClose)
+                .build());
+
+        // ---- 逐元素淡变的四个细分开关（Sodium 页也有，保持一致）----
+        layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("逐元素淡入淡出"), TransitionConfig.fade())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("物品与文字是否逐元素淡变。关掉 = 只滑动、不淡"))
+                .setSaveConsumer(TransitionConfig::setFade)
+                .build());
+
+        layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("遮罩随动画一起淡出"), TransitionConfig.fadeDim())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("界面淡出时，那层变暗遮罩一起变淡，世界随之变亮"),
+                        Component.literal("关掉的话动画中途会有一层灰黑挡着"))
+                .setSaveConsumer(TransitionConfig::setFadeDim)
+                .build());
+
+        layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("物品图标淡变"), TransitionConfig.fadeItems())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("槽内物品图标是否参与淡变；关掉则只有底板与文字在动"))
+                .setSaveConsumer(TransitionConfig::setFadeItems)
+                .build());
+
+        layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("文字淡变"), TransitionConfig.fadeText())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("界面标题等文字是否参与淡变"))
+                .setSaveConsumer(TransitionConfig::setFadeText)
+                .build());
+
+        layers.addEntry(entries.startBooleanToggle(
+                        Component.literal("关闭动画期间允许转视角"), TransitionConfig.allowLookDuringClose())
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("关闭界面时鼠标立刻交还给游戏，可以马上转视角。"),
+                        Component.literal("关掉 = 关闭动画播完前鼠标一直被界面占用"))
+                .setSaveConsumer(TransitionConfig::setAllowLookDuringClose)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
@@ -238,14 +290,7 @@ public final class UiTransitionsConfigScreen {
                 .setSaveConsumer(TransitionConfig::setPortalDurationMs)
                 .build());
 
-        portal.addEntry(entries.startBooleanToggle(
-                        Component.literal("只淡入淡出（不滑动）"), TransitionConfig.portalFadeOnly())
-                .setDefaultValue(true)
-                .setTooltip(Component.literal("默认打开：传送门加载界面只做淡变，不做上下位移。"),
-                        Component.literal("关掉 = 和普通界面一样也滑动（用上面的位移距离）"))
-                .setSaveConsumer(TransitionConfig::setPortalFadeOnly)
-                .build());
-
+        
         portal.addEntry(entries.startTextDescription(Component.literal(
                 "覆盖的界面：LevelLoadingScreen（26.3 里「正在下载地形」就是它，\n"
                         + "首次进世界与维度切换都走这个界面）以及 ProgressScreen。")).build());

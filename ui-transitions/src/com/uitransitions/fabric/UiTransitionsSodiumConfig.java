@@ -144,13 +144,28 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
                 TransitionConfig.MIN_PORTAL_DURATION_MS, TransitionConfig.MAX_PORTAL_DURATION_MS, 50,
                 TransitionConfig::setPortalDurationMs,
                 value -> tr(value + " 毫秒")));
-        layers.addOption(bool(builder, "portal_fade_only", "传送门加载只淡入淡出",
-                "打开：传送门加载界面不做上下位移，只淡变（默认）", true,
-                TransitionConfig::setPortalFadeOnly));
+        
         // 默认值与 TransitionConfig.animateSameTypeSwitch 一致：默认是**做**动画的
         layers.addOption(bool(builder, "animate_same_type_switch", "同类界面切换也做动画",
                 "创造模式分类标签、配方书翻页这类同界面换页是否也做过渡动画（默认做）", true,
                 TransitionConfig::setAnimateSameTypeSwitch));
+        layers.addOption(bool(builder, "open_from_bottom", "打开时自下而上滑入",
+                "关掉 = 改为自上而下滑入", true,
+                value -> {
+                    if (value != TransitionConfig.openFromBottom()) {
+                        TransitionConfig.toggleOpenDirection();
+                    }
+                }));
+        layers.addOption(bool(builder, "close_to_bottom", "关闭时向下滑出",
+                "关掉 = 改为向上滑出", true,
+                value -> {
+                    if (value != TransitionConfig.closeToBottom()) {
+                        TransitionConfig.toggleCloseDirection();
+                    }
+                }));
+        layers.addOption(bool(builder, "allow_look_during_close", "关闭动画期间允许转视角",
+                "关闭界面时鼠标立刻交还给游戏，可以马上转视角（默认开）", true,
+                TransitionConfig::setAllowLookDuringClose));
         layers.addOption(bool(builder, "overlay_mods_fade_only", "装了 JEI 类模组时只淡变不位移",
                 "JEI/EMI/REI 的固定按钮和底板在同一条渲染层里，只能靠整个界面不滑来让它们留在原地", true,
                 TransitionConfig::setOverlayModsFadeOnly));
@@ -199,12 +214,14 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "animate_tab_switch" -> TransitionConfig.animateTabSwitch();
             case "stagger_close" -> TransitionConfig.staggerClose();
             case "overlay_mods_fade_only" -> TransitionConfig.overlayModsFadeOnly();
+            case "open_from_bottom" -> TransitionConfig.openFromBottom();
+            case "close_to_bottom" -> TransitionConfig.closeToBottom();
+            case "allow_look_during_close" -> TransitionConfig.allowLookDuringClose();
             case "animate_all_screens" -> TransitionConfig.animateAllScreens();
             case "fade" -> TransitionConfig.fade();
             case "fade_dim" -> TransitionConfig.fadeDim();
             case "fade_items" -> TransitionConfig.fadeItems();
             case "fade_text" -> TransitionConfig.fadeText();
-            case "portal_fade_only" -> TransitionConfig.portalFadeOnly();
             default -> unknownBool(key);
         };
     }

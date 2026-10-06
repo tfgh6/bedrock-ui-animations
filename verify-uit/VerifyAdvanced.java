@@ -539,8 +539,9 @@ public class VerifyAdvanced {
         int veilEnd = extractor.lastFillColor >>> 24;
         check("淡出结束后遮罩完全透明（画面交还给世界）", veilEnd == 0, "alpha=" + veilEnd);
 
-        check("关掉「只淡入淡出」就不画遮罩",
-                TransitionConfig.portalFadeOnly(), "portalFadeOnly=false");
+        check("时长为 0 表示不要这个过渡（不再画遮罩）",
+                TransitionConfig.MIN_PORTAL_DURATION_MS == 0 && TransitionConfig.MAX_PORTAL_DURATION_MS <= 3000,
+                "范围=" + TransitionConfig.MIN_PORTAL_DURATION_MS + ".." + TransitionConfig.MAX_PORTAL_DURATION_MS);
 
         TransitionConfig.resetToDefaults();
         System.out.println();

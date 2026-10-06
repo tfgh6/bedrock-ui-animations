@@ -1204,11 +1204,8 @@ public final class UiTransitions {
         }
     }
 
-    /** 传送门加载界面默认只淡入淡出、不位移 */
+    /** 这一段动画该位移多少像素（跨维度那类界面根本不参与常规动画，所以不用特判） */
     private static float offsetFor(Screen screen) {
-        if (TransitionConfig.portalFadeOnly() && isPortalLoading(screen)) {
-            return 0.0F;
-        }
         return TransitionConfig.offset();
     }
 

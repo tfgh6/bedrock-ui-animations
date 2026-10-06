@@ -47,21 +47,12 @@ public final class TransitionConfig {
     public static final int MIN_PORTAL_DURATION_MS = 0;
     public static final int MAX_PORTAL_DURATION_MS = 3000;
 
-    private static volatile boolean portalFadeOnly = true;
     private static volatile int portalDurationMs = DEFAULT_PORTAL_DURATION_MS;
-
-    public static boolean portalFadeOnly() {
-        return portalFadeOnly;
-    }
 
     public static int portalDurationMs() {
         return portalDurationMs;
     }
 
-    public static synchronized void setPortalFadeOnly(boolean value) {
-        portalFadeOnly = value;
-        save();
-    }
 
     public static synchronized void setPortalDurationMs(int value) {
         portalDurationMs = Math.max(MIN_PORTAL_DURATION_MS,
@@ -375,7 +366,6 @@ public final class TransitionConfig {
         tabSwitchMs = clampTabMs(readInt(properties, "tabSwitchMs", tabSwitchMs));
         scrollFadeBand = clampBand(readInt(properties, "scrollFadeBand", scrollFadeBand));
         scrollFadeMin = clampMin(readInt(properties, "scrollFadeMin", scrollFadeMin));
-        portalFadeOnly = readBoolean(properties, "portalFadeOnly", portalFadeOnly);
         portalDurationMs = Math.max(MIN_PORTAL_DURATION_MS, Math.min(MAX_PORTAL_DURATION_MS, readInt(properties, "portalDurationMs", portalDurationMs)));
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
@@ -417,13 +407,12 @@ public final class TransitionConfig {
         properties.setProperty("openDurationMs", Integer.toString(openDurationMs));
         properties.setProperty("closeDurationMs", Integer.toString(closeDurationMs));
         properties.setProperty("offset", Float.toString(offset));
-        properties.setProperty("curve", curveId);
+        // 只写"渐入/渐出"这一对。旧的通用 curve / curveCustom 已经没有任何界面在用，
+        // 继续写只会让配置文件里多两行让人困惑的死键；load() 仍然读它们做迁移。
         properties.setProperty("openCurve", openCurveId);
         properties.setProperty("closeCurve", closeCurveId);
-        properties.setProperty("curveCustom", curveCustom);
         properties.setProperty("openCurveCustom", openCurveCustom);
         properties.setProperty("closeCurveCustom", closeCurveCustom);
-        properties.setProperty("portalFadeOnly", Boolean.toString(portalFadeOnly));
         properties.setProperty("portalDurationMs", Integer.toString(portalDurationMs));
         properties.setProperty("fade", Boolean.toString(fade));
         properties.setProperty("fadeDim", Boolean.toString(fadeDim));
@@ -496,7 +485,6 @@ public final class TransitionConfig {
         tabSwitchMs = DEFAULT_TAB_SWITCH_MS;
         scrollFadeBand = 200;
         scrollFadeMin = 0;
-        portalFadeOnly = true;
         portalDurationMs = DEFAULT_PORTAL_DURATION_MS;
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;
@@ -1090,11 +1078,12 @@ public final class TransitionConfig {
                 "enabled=%s open=%dms/%s close=%dms/%s offset=%.0fpx jelly=%.0f%% "
                         + "fade=%s(fadeDim=%s items=%s text=%s) openFromBottom=%s closeToBottom=%s "
                         + "allScreens=%s sameTypeSwitch=%s panel=%s dim=%s subtitles=%s "
-                        + "playerModelFollows=%s",
+                        + "portal=%dms lookDuringClose=%s",
                 enabled(), openDurationMs(), openCurve().id(), closeDurationMs(), closeCurve().id(),
                 offset(), jelly() * 100.0F,
                 fade(), fadeDim(), fadeItems(), fadeText(),
                 openFromBottom(), closeToBottom(), animateAllScreens(), animateSameTypeSwitch(),
-                animatePanel(), animateDim(), animateSubtitles(), portalFadeOnly(), portalDurationMs());
+                animatePanel(), animateDim(), animateSubtitles(),
+                portalDurationMs(), allowLookDuringClose());
     }
 }
