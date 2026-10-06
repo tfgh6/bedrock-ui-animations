@@ -583,11 +583,19 @@ public final class UiTransitions {
     }
 
     /**
-     * 每帧调用：只有滚动位置**真的变了**才启动逐格渐变。
+     * 每帧调用：只有滚动位置**真的变了**才刷新逐格渐变的时间基准。
      *
-     * 不能挂在输入事件上 —— 手机上每次点击都会被映射成拖动事件，那样点哪里都会闪。
-     * 拖动是每帧触发滚动量的，如果每次都重置起点，物品会一直停在近乎空白的状态，
-     * 所以进行中就不重置。
+     * 不能挂在输入事件上 —— 手机上每次点击都会被映射成拖动事件，
+     * 但这里已经用"滚动位置是否真的变了"兜住了：单纯点一下不会触发。
+     *
+     * 时间基准每次滚动都**重新计时**，也就是这段渐变随时可以被打断、立刻跟上手速。
+     * 早先版本加了"上一段没播完就不重置"的守卫，结果拖动时画面要等一整段动画
+     * 走完才更新一次 —— 手感上就是"隔一会儿才刷新一下"，动画时长调长之后尤其明显。
+     *
+     * 当初那个守卫是为了避免"重置起点导致物品一直停在近乎空白"：
+     * 那说的是**整片均匀**淡变的老实现。现在每格用的是按离进入边距离算出的
+     * 各自下限（见 slotFloorAlpha），远离进入边的格子基本保持不透明，
+     * 反复重置只会让进入边一直保持淡出 —— 那正是滚动时想要的反馈。
      */
     public static void onGridScrollIfChanged(Screen screen, float scrollOffs) {
         try {
@@ -598,15 +606,9 @@ public final class UiTransitions {
             Float previous = LAST_SCROLL.get(screen);
             LAST_SCROLL.put(screen, scrollOffs);
             if (previous == null || Math.abs(previous - scrollOffs) < 0.0005F) {
-                return;      // 没真的滚动
+                return;      // 没真的滚动：保持现状，让当前这段继续往 1 收敛
             }
             float direction = scrollOffs > previous ? 1.0F : -1.0F;
-            TabSwitch existing = TAB_SWITCH.get(screen);
-            if (existing != null
-                    && (System.nanoTime() - existing.startNanos())
-                    < TransitionConfig.tabSwitchMs() * 1_000_000L) {
-                return;      // 上一段还没播完，别一直重置起点
-            }
             TAB_SWITCH.put(screen, new TabSwitch(System.nanoTime(), direction));
         } catch (Throwable t) {
             report("onGridScrollIfChanged", t);
@@ -938,8 +940,15 @@ public final class UiTransitions {
      * 0.92 表示它比底板早约 8% 走完 —— 刚好够避免露出空洞，又几乎看不出先后。
      * 之前是 0.55（早 45%），动画一长就能明显看出"先消失的痕迹"。
      */
-    /** 淡变的起点下限：0 = 整片透明（会闪），0.62 = 柔和浮现 */
-    private static final float FADE_FLOOR = 0.62F;
+    /**
+     * 原地淡变的起点透明度（点分类标签时整个物品区从这里淡到 1）。
+     *
+     * 早先是 0.62：担心"整片透明会像闪一下"，于是只让它在 62%→100% 之间动。
+     * 实际观感是这点变化太小、几乎看不出来。现在放宽到 0.25 —— 配合 600ms 的时长，
+     * 既能明显看出一次淡入，又不至于整片消失后突然冒出来。
+     * （滚动走的是另一条路：按离进入边的距离逐格算，见 slotFloorAlpha。）
+     */
+    private static final float FADE_FLOOR = 0.25F;
 
     private static final float CONTENT_FADE_SPAN = 0.92F;
 

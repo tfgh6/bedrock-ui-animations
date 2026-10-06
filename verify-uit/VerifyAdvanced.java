@@ -336,7 +336,7 @@ public class VerifyAdvanced {
                 "alpha=" + scrollHotbarAlpha);
 
         // (e) 同一个滚动位置重复喂入不应重置动画（拖动滚动条是每帧调用的）
-        Thread.sleep(60);
+        Thread.sleep(150);
         UiTransitions.onGridScrollIfChanged(creative, 0.8F);    // 同值 → 应被忽略
         UiTransitions.beginContentLayer(creative, extractor);
         UiTransitions.beginTabContent(creative, extractor);
@@ -360,6 +360,31 @@ public class VerifyAdvanced {
         UiTransitions.endTabContent(creative, extractor);
         UiTransitions.endContentLayer(creative, extractor);
         check("原地淡变结束后槽位恢复不透明", idleAlpha == 255, "alpha=" + idleAlpha);
+
+        // (g) 连续拖动必须能**打断**上一段：滚动位置一变就重新计时，
+        //     否则动画时长一长，拖动时会变成"隔一会儿才刷新一次"。
+        UiTransitions.onGridScrollIfChanged(creative, 0.1F);   // 换个基准
+        UiTransitions.onGridScrollIfChanged(creative, 0.3F);   // 滚动 → 起一段
+        Thread.sleep(250);                                     // 让它爬升到中途
+        UiTransitions.beginContentLayer(creative, extractor);
+        UiTransitions.beginTabContent(creative, extractor);
+        UiTransitions.beginSlotFade(false, 180);
+        int midRamp = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endSlotFade(180);
+        UiTransitions.endTabContent(creative, extractor);
+        UiTransitions.endContentLayer(creative, extractor);
+
+        UiTransitions.onGridScrollIfChanged(creative, 0.6F);   // 又滚了 → 必须立刻重新计时
+        UiTransitions.beginContentLayer(creative, extractor);
+        UiTransitions.beginTabContent(creative, extractor);
+        UiTransitions.beginSlotFade(false, 180);
+        int afterInterrupt = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endSlotFade(180);
+        UiTransitions.endTabContent(creative, extractor);
+        UiTransitions.endContentLayer(creative, extractor);
+        check("拖动中途再次滚动会立刻重新计时（跟得上手速）",
+                afterInterrupt < 60 && afterInterrupt < midRamp,
+                "爬升中=" + midRamp + " 再次滚动后=" + afterInterrupt);
 
         TransitionConfig.resetToDefaults();
         System.out.println();

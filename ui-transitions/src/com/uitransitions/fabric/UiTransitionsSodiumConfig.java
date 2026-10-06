@@ -125,7 +125,7 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
                 "点创造模式物品栏的分类标签时，物品区原地淡入（底板、标签栏、快捷栏都不动）", true,
                 TransitionConfig::setAnimateTabSwitch));
         layers.addOption(intOption(builder, "tab_switch_ms", "标签切换时长",
-                "点分类标签 / 滚动物品列表时的原地淡变时长；默认 450 毫秒",
+                "点分类标签 / 滚动物品列表时的原地淡变时长；默认 600 毫秒",
                 TransitionConfig.DEFAULT_TAB_SWITCH_MS,
                 TransitionConfig.MIN_TAB_SWITCH_MS, TransitionConfig.MAX_TAB_SWITCH_MS, 10,
                 TransitionConfig::setTabSwitchMs,

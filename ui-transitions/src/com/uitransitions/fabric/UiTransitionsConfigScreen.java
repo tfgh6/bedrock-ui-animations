@@ -171,8 +171,8 @@ public final class UiTransitionsConfigScreen {
                         TransitionConfig.tabSwitchMs(),
                         TransitionConfig.MIN_TAB_SWITCH_MS, TransitionConfig.MAX_TAB_SWITCH_MS)
                 .setDefaultValue(TransitionConfig.DEFAULT_TAB_SWITCH_MS)
-                .setTooltip(Component.literal("点分类标签 / 滚动物品列表时的原地淡变时长，默认 450。"),
-                        Component.literal("这类淡变没有位移，太短同样会显得一闪而过"))
+                .setTooltip(Component.literal("点分类标签 / 滚动物品列表时的原地淡变时长，默认 600。"),
+                        Component.literal("这类淡变没有位移，太短会显得一闪而过"))
                 .setSaveConsumer(TransitionConfig::setTabSwitchMs)
                 .build());
 

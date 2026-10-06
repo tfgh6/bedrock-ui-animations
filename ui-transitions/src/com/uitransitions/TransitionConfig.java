@@ -34,7 +34,7 @@ public final class TransitionConfig {
     public static final int MAX_DURATION_MS = 5000;
 
     /** 原地淡变（点分类标签 / 滚动）的默认时长与范围 */
-    public static final int DEFAULT_TAB_SWITCH_MS = 450;
+    public static final int DEFAULT_TAB_SWITCH_MS = 600;
     public static final int MIN_TAB_SWITCH_MS = 50;
     public static final int MAX_TAB_SWITCH_MS = 2000;
 
