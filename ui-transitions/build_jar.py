@@ -132,9 +132,44 @@ def check_mixin_targets():
     return True
 
 
+def check_no_foreign_classes():
+    """
+    硬闸：产物目录里绝不允许出现模组自身命名空间以外的 class。
+
+    踩过的坑：tools/compile.py 生成的 NeoForge 桩类（net/neoforged/**）曾经和正式源码
+    输出到同一个目录，于是被打进了 jar。NeoForge 用 JPMS 加载模组，jar 一旦"导出"了
+    net.neoforged.neoforge.client.gui，就会和 neoforge 模块冲突，FML 直接抛
+    ResolutionException 拒绝启动 —— 1.3.0 到 1.4.0 的每个包都中招。
+
+    这种包靠"看一眼日志里的警告"是拦不住的，必须让构建直接失败。
+    """
+    foreign = []
+    for root, _, files in os.walk(CLASSES):
+        for f in files:
+            if not f.endswith(".class"):
+                continue
+            rel = os.path.relpath(os.path.join(root, f), CLASSES).replace(os.sep, "/")
+            if not rel.startswith("com/uitransitions/"):
+                foreign.append(rel)
+    if foreign:
+        print("  [严重] 产物里混入了非本模组的 class（%d 个）：" % len(foreign))
+        for rel in sorted(foreign)[:12]:
+            print("         " + rel)
+        if len(foreign) > 12:
+            print("         ...（还有 %d 个）" % (len(foreign) - 12))
+        print("         很可能是 NeoForge 桩类混进了编译输出目录。")
+        print("         这类包会让 NeoForge 因 JPMS 包冲突直接拒绝启动，不能发布。")
+        sys.exit("产物被污染，已中止打包")
+    print("产物纯净性检查: 通过（%d 个 class 全部属于 com/uitransitions）"
+          % sum(len([f for f in files if f.endswith(".class")])
+                for _, _, files in os.walk(CLASSES)))
+
+
 def main():
     if not os.path.isdir(CLASSES):
         sys.exit("找不到编译产物目录：%s" % CLASSES)
+
+    check_no_foreign_classes()
 
     fabric, mixins, problems = validate_metadata()
     if problems:

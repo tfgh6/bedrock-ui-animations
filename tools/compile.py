@@ -18,6 +18,7 @@ README 里那条一行命令很难维护（依赖路径随机器变化、还漏�
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -27,6 +28,8 @@ REPO = os.path.dirname(HERE)
 SRC = os.path.join(REPO, "ui-transitions", "src")
 OUT = os.path.join(REPO, "build", "ui-transitions", "classes")
 STUBS = os.path.join(REPO, "build", "neoforge-stubs")
+# 桩类的编译产物必须和正式产物分开，否则会被打包进 jar（见 compile_stub_classes）
+STUB_CLASSES = os.path.join(REPO, "build", "neoforge-stubs-classes")
 
 JDK_CANDIDATES = [
     os.environ.get("JAVA_HOME"),
@@ -165,7 +168,9 @@ def collect_classpath(no_stubs):
             missing_required.append("NeoForge API (net.neoforged.fml.*)")
         else:
             write_stubs()
-            cp.append(STUBS)
+            # 注意加的是**桩类的编译产物目录**，不是桩类源码目录：
+            # 桩类只用来做类型检查，绝不能进正式产物（见 compile_stub_classes）。
+            cp.append(STUB_CLASSES)
             used_stubs = True
     return cp, missing_required, missing_optional, used_stubs
 
@@ -184,6 +189,40 @@ def write_stubs():
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="") as fh:
             fh.write(src.lstrip())
+
+
+def compile_stub_classes(javac, release, cp):
+    """
+    把桩类编译到**独立目录**，绝不和正式产物混在一起。
+
+    这里踩过一个很贵的坑：桩类曾经和正式源码输出到同一个目录，而打包脚本正是
+    打包那个目录 —— 结果 jar 里带上了 net/neoforged/** 。NeoForge 用 JPMS 加载模组，
+    jar 一旦"导出"了 net.neoforged.neoforge.client.gui，就会和 neoforge 模块冲突，
+    FML 直接抛 ResolutionException 拒绝启动。1.3.0 到 1.4.0 的每个包都中招，
+    NeoForge 侧等于从来没跑起来过，而构建日志一直只是打印一句警告。
+
+    注意要带上 cp：桩类里引用了 Minecraft 的类型（比如 IConfigScreenFactory 里的 Screen）。
+    """
+    sources = []
+    for root, _, files in os.walk(STUBS):
+        for f in sorted(files):
+            if f.endswith(".java"):
+                sources.append(os.path.join(root, f))
+    if not sources:
+        return 0
+    os.makedirs(STUB_CLASSES, exist_ok=True)
+    cmd = [javac, "-J-Duser.language=en", "-J-Duser.country=US",
+           "--release", release, "-proc:none", "-nowarn",
+           "-encoding", "UTF-8", "-cp", os.pathsep.join(cp), "-d", STUB_CLASSES]
+    cmd.extend(sources)
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        print("桩类编译失败（退出码 %d）" % proc.returncode)
+        print(proc.stdout.strip())
+        print(proc.stderr.strip())
+        return proc.returncode
+    return 0
 
 
 def main():
@@ -210,8 +249,12 @@ def main():
     if used_stubs:
         print()
         print("!! 未找到 NeoForge 开发期 API，已生成仅供类型检查的桩类 -> %s" % STUBS)
+        print("!! 桩类编译到独立目录，不会进正式产物 -> %s" % STUB_CLASSES)
         print("!! NeoForge 侧的真实 API 兼容性**没有**被验证；请在有 NeoForge 的环境里做加载测试。")
         print()
+        rc = compile_stub_classes(javac, args.release, cp)
+        if rc != 0:
+            return rc
 
     sources = []
     for root, _, files in os.walk(SRC):
@@ -222,6 +265,13 @@ def main():
         sys.exit("在 %s 下没找到任何 .java" % SRC)
 
     os.makedirs(args.out, exist_ok=True)
+    # 先清空输出目录：既保证没有陈旧 class，也顺手清掉历史版本可能留在里面的桩类
+    for name in os.listdir(args.out):
+        target = os.path.join(args.out, name)
+        if os.path.isdir(target):
+            shutil.rmtree(target, ignore_errors=True)
+        else:
+            os.remove(target)
     cmd = [javac, "-J-Duser.language=en", "-J-Duser.country=US",
            "--release", args.release, "-proc:none", "-nowarn",
            "-encoding", "UTF-8", "-cp", os.pathsep.join(cp), "-d", args.out]
