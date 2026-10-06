@@ -100,8 +100,8 @@ scrollFadeMin=0               # 滚动时进入边那一侧的最低透明度（
 animateSameTypeSwitch=true    # 同类界面换页也做动画（默认做）
 animateAllScreens=false       # 所有界面都加动画（默认只做容器界面）
 overlayModsFadeOnly=true      # 装了 JEI 类模组时改为只淡变不位移
-portalDurationMs=1500        # 传送门/维度切换加载界面的过渡时长（100–10000 毫秒）
-portalFadeOnly=true           # 传送门加载只淡入淡出、不滑动（默认开）
+portalDurationMs=900         # 跨维度过渡的淡出时长（0–3000 毫秒，0 = 关闭该效果）
+portalFadeOnly=true           # 跨维度过渡只淡入淡出、不滑动（默认开）
 allowLookDuringClose=true     # 关闭动画期间是否允许转动视角
 extraScreens=mezz.jei,dev.emi.emi,me.shedaniel.rei
 excludedScreens=              # 不做动画的界面（按前缀匹配，可写类名或包名）

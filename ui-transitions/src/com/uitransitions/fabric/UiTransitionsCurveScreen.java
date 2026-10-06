@@ -1,9 +1,11 @@
 package com.uitransitions.fabric;
 
 import com.uitransitions.TransitionConfig;
+import com.uitransitions.UiTransitions;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
@@ -12,13 +14,11 @@ import java.util.Locale;
 /**
  * 曲线编辑界面：左边可拖拽的贝塞尔曲线图，右边是**背包开关动画**的预览。
  *
- * 预览不是抽象色块，而是照着背包界面的样子摆的：底板 + 物品格 + 玩家小模型，
- * 按真实的渐入/渐出时长与曲线循环播放。这样调出来的手感就是实机的手感。
+ * 预览贴的是原版背包界面的贴图（AbstractContainerScreen.INVENTORY_LOCATION），
+ * 所以看到的就是实机里那块 UI 本身在做渐入 / 渐出，而不是抽象色块。
  *
- * 图上两个控制点可以直接拖。"看到的"和"存下来的"用的是同一段求值代码
- * （{@link TransitionConfig.Curve#bezierEase}），不会出现"预览好看、实机不对"。
- *
- * 点「完成」会把这条曲线存到当前方向，并把该方向切到 custom。
+ * 底部四个**原版滑块**是主要的修改方式：单击即可改值，触屏上也可靠
+ * （图上拖拽依赖鼠标事件，在安卓这类触控设备上不一定送得到）。
  */
 public final class UiTransitionsCurveScreen extends Screen {
 
@@ -41,10 +41,13 @@ public final class UiTransitionsCurveScreen extends Screen {
     /** 画图时上下各留出一点空间，这样带回弹过冲的曲线也画得下 */
     private static final float VIEW_MIN = -0.5F;
     private static final float VIEW_MAX = 1.5F;
-    /** 画出来的方块半径（GUI 单位，实际观感还要乘界面缩放） */
     private static final int HANDLE_RADIUS = 5;
-    /** 离方块多近算"抓住它"；超出这个距离也照样响应，只是改成"把最近的移过来" */
     private static final int GRAB_DISTANCE = 18;
+
+    /** 原版背包贴图是 176x166，放在 256x256 的图里 */
+    private static final int INV_W = 176;
+    private static final int INV_H = 166;
+    private static final float INV_TEX = 256.0F;
 
     private static final int COLOR_BG = 0xFF101418;
     private static final int COLOR_BORDER = 0xFF5A6470;
@@ -56,7 +59,7 @@ public final class UiTransitionsCurveScreen extends Screen {
     private static final int COLOR_TEXT = 0xFFE0E0E0;
     private static final int COLOR_HINT = 0xFF9AA0A6;
 
-    /** 预览里那块"背包"的配色，尽量贴近原版 */
+    /** 兜底用的假界面配色：万一贴图没画出来，至少还是一块像背包的底板 */
     private static final int COLOR_PANEL = 0xFFC6C6C6;
     private static final int COLOR_SLOT = 0xFF8B8B8B;
     private static final int COLOR_DOLL = 0xFF6FA8DC;
@@ -101,19 +104,21 @@ public final class UiTransitionsCurveScreen extends Screen {
     @Override
     protected void init() {
         this.startNanos = System.nanoTime();
-        int margin = 20;
-        int buttonRow = 26;
-        // 图 + 四个滑块要竖着排下来，所以图不能再占满高度
-        int size = Math.min(120, Math.max(70, Math.min(this.width / 2 - margin - 10,
-                this.height - buttonRow - 150)));
-        this.graphSize = size;
-        this.graphX = margin;
-        this.graphY = 46;
+        int margin = 16;
+        int bottomBar = 30;
 
-        this.previewX = this.graphX + this.graphSize + 22;
+        // 左边一列：曲线图 + 四个滑块。右边：预览。
+        int columnWidth = Math.max(96, Math.min(this.width / 4, 150));
+        this.graphX = margin;
+        this.graphY = 44;
+        int sliderBlock = 4 * 21 + 12;                  // 四个滑块 + 与图之间的间距
+        int available = this.height - bottomBar - this.graphY - sliderBlock - 14;
+        this.graphSize = Math.max(56, Math.min(130, Math.min(columnWidth, available)));
+
+        this.previewX = this.graphX + columnWidth + 14;
         this.previewY = this.graphY;
-        this.previewWidth = Math.max(110, this.width - this.previewX - margin);
-        this.previewHeight = Math.max(70, this.height - this.previewY - buttonRow - 76);
+        this.previewWidth = Math.max(120, this.width - this.previewX - margin);
+        this.previewHeight = Math.max(60, this.height - bottomBar - this.previewY - 18);
 
         buildSliders();
 
@@ -145,16 +150,16 @@ public final class UiTransitionsCurveScreen extends Screen {
      * 触控和鼠标都可靠，而且这是每个模组都在用的控件。
      */
     private void buildSliders() {
-        int y = this.graphY + this.graphSize + 18;
+        int y = this.graphY + this.graphSize + 14;
         int x = this.graphX;
-        int w = Math.max(80, this.graphSize);
+        int w = Math.max(90, Math.min(this.width / 4, 150));
         for (int i = 0; i < 4; i++) {
             final int index = i;
             boolean isX = (i % 2 == 0);
             float min = isX ? 0.0F : VIEW_MIN;
             float max = isX ? 1.0F : VIEW_MAX;
             String label = new String[] { "P1 x", "P1 y", "P2 x", "P2 y" }[i];
-            ValueSlider slider = new ValueSlider(x, y + i * 22, w, 20, label, min, max,
+            ValueSlider slider = new ValueSlider(x, y + i * 21, w, 20, label, min, max,
                     this.points[i], value -> this.points[index] = value);
             this.sliders[i] = slider;
             addRenderableWidget(slider);
@@ -191,11 +196,10 @@ public final class UiTransitionsCurveScreen extends Screen {
         super.extractRenderState(extractor, mouseX, mouseY, partialTick);
 
         extractor.centeredText(this.font,
-                Component.literal("曲线编辑 —— " + this.target.label()),
-                this.width / 2, 14, COLOR_TEXT);
+                Component.literal("曲线编辑 —— " + this.target.label()), this.width / 2, 10, COLOR_TEXT);
         extractor.centeredText(this.font,
-                Component.literal("在图框里任意位置点一下，最近的那个方块就会移过去；按住拖动即可微调"),
-                this.width / 2, 28, COLOR_HINT);
+                Component.literal("拖动图上的黄色方块，或用左下角的滑块调整"),
+                this.width / 2, 24, COLOR_HINT);
 
         drawGraph(extractor, mouseX, mouseY);
         drawPreview(extractor);
@@ -225,20 +229,13 @@ public final class UiTransitionsCurveScreen extends Screen {
             extractor.fill(px, py, px + 1, py + 1, COLOR_DIAGONAL);
         }
 
+        drawCurve(extractor);
+
         // 控制点连线
         extractor.fill(toScreenX(0.0F), toScreenY(0.0F), toScreenX(this.points[0]), toScreenY(this.points[1]),
                 COLOR_HANDLE_LINE);
         extractor.fill(toScreenX(1.0F), toScreenY(1.0F), toScreenX(this.points[2]), toScreenY(this.points[3]),
                 COLOR_HANDLE_LINE);
-
-        // 曲线本体：逐点取样画小方块，用的是与实机同一段求值代码
-        for (int i = 0; i <= 120; i++) {
-            float t = i / 120.0F;
-            float v = TransitionConfig.Curve.bezierEase(this.points, t);
-            int px = toScreenX(t);
-            int py = toScreenY(v);
-            extractor.fill(px, py, px + 2, py + 2, COLOR_CURVE);
-        }
 
         drawHandle(extractor, this.points[0], this.points[1],
                 this.dragging == 1 || isNear(mouseX, mouseY, this.points[0], this.points[1]));
@@ -251,14 +248,42 @@ public final class UiTransitionsCurveScreen extends Screen {
         } else if (this.dragging == 2) {
             state = "正在调整 P2";
         } else {
-            state = "把鼠标移到图上，点一下就能把最近的方块放过去";
+            state = "P1 / P2 也可以点图挪动";
         }
         extractor.text(this.font,
-                String.format(Locale.ROOT, "P1 %.2f, %.2f    P2 %.2f, %.2f",
+                String.format(Locale.ROOT, "P1 %.2f,%.2f  P2 %.2f,%.2f",
                         this.points[0], this.points[1], this.points[2], this.points[3]),
-                x0, y1 + 6, COLOR_TEXT);
-        extractor.text(this.font, Component.literal(state), x0, y1 + 18,
+                x0, y1 + 3, COLOR_TEXT);
+        extractor.text(this.font, Component.literal(state), x0, y1 + 14,
                 this.dragging != 0 ? COLOR_HANDLE : COLOR_HINT);
+    }
+
+    /**
+     * 把曲线画成**连续的折线**，而不是一串小方块。
+     *
+     * 早先是每隔一点画一个 2x2 的方块，采样一稀就露出锯齿、看着发糊。
+     * 现在逐列填充、把相邻采样点连起来，线是连续的，边缘也干净。
+     */
+    private void drawCurve(GuiGraphicsExtractor extractor) {
+        int samples = Math.max(64, this.graphSize * 2);
+        int prevX = Integer.MIN_VALUE;
+        int prevY = 0;
+        for (int i = 0; i <= samples; i++) {
+            float t = i / (float) samples;
+            float v = TransitionConfig.Curve.bezierEase(this.points, t);
+            int px = toScreenX(t);
+            int py = toScreenY(v);
+            if (prevX == Integer.MIN_VALUE) {
+                extractor.fill(px, py, px + 1, py + 1, COLOR_CURVE);
+            } else if (px > prevX) {
+                for (int x = prevX + 1; x <= px; x++) {
+                    int y = prevY + Math.round((py - prevY) * (x - prevX) / (float) (px - prevX));
+                    extractor.fill(x, y, x + 1, y + 1, COLOR_CURVE);
+                }
+            }
+            prevX = px;
+            prevY = py;
+        }
     }
 
     private boolean isNear(double mouseX, double mouseY, float cx, float cy) {
@@ -300,6 +325,7 @@ public final class UiTransitionsCurveScreen extends Screen {
     /**
      * 按**真实配置的时长与曲线**循环播放一次"打开背包 → 停一会儿 → 关闭背包"。
      *
+     * 贴的是原版背包贴图，所以看到的就是实机那块 UI 本身在动。
      * 用真实时长而不是固定的演示时长：调完曲线想看看"500ms 到底是多快"时，
      * 这里给的就是实机的节奏。
      */
@@ -311,8 +337,6 @@ public final class UiTransitionsCurveScreen extends Screen {
 
         extractor.fill(x, y, x + w, y + h, COLOR_BG);
         extractor.outline(x, y, w, h, COLOR_BORDER);
-        extractor.text(this.font, Component.literal("预览：打开 / 关闭背包"),
-                x + 6, y + 5, COLOR_TEXT);
 
         int openMs = Math.max(1, TransitionConfig.openDurationMs());
         int closeMs = Math.max(1, TransitionConfig.closeDurationMs());
@@ -344,26 +368,50 @@ public final class UiTransitionsCurveScreen extends Screen {
             phaseName = "渐出";
         }
 
-        int innerX = x + 8;
-        int innerY = y + 18;
-        int innerW = w - 16;
-        int innerH = h - 40;
-        // 位移按预览区高度缩放，最多走 1/4 屏，够看出方向又不至于跑出框
-        int maxSlide = Math.max(6, innerH / 4);
-        int offset = Math.round(maxSlide * slide);
+        // 统一交给模组的透明度通道：贴图和方块都会跟着淡
         int a = Math.max(0, Math.min(255, Math.round(alpha * 255.0F)));
+        int stageH = Math.max(30, h - 16);
+        int maxSlide = Math.max(6, stageH / 6);
+        int offset = Math.round(maxSlide * slide);
 
-        drawMockInventory(extractor, innerX, innerY + offset, innerW, innerH, a);
+        UiTransitions.pushPreviewAlpha(alpha);
+        try {
+            int panelW = Math.min(w - 12, INV_W);
+            int panelH = Math.min(stageH, INV_H);
+            int px = x + (w - panelW) / 2;
+            int py = y + 4 + (stageH - panelH) / 2 + offset;
+            drawMockInventory(extractor, px, py, panelW, panelH, a);
+            blitVanillaInventory(extractor, px, py, panelW, panelH);
+        } finally {
+            UiTransitions.popPreviewAlpha();
+        }
 
+        // 文字放在面板**外面**，不再压住画面
+        extractor.text(this.font, Component.literal("预览：打开 / 关闭背包"), x + 4, y + 4, COLOR_TEXT);
         extractor.text(this.font,
-                Component.literal(String.format(Locale.ROOT, "%s  透明度 %d%%", phaseName, Math.round(alpha * 100))),
-                x + 6, y + h - 14, COLOR_HINT);
-        extractor.text(this.font,
-                Component.literal(String.format(Locale.ROOT, "渐入 %dms / 渐出 %dms", openMs, closeMs)),
-                x + 6, y + h - 26, COLOR_HINT);
+                Component.literal(String.format(Locale.ROOT, "%s   透明度 %d%%   渐入 %dms / 渐出 %dms",
+                        phaseName, Math.round(alpha * 100), openMs, closeMs)),
+                x + 4, y + h - 12, COLOR_HINT);
     }
 
-    /** 照背包的样子画一块底板：物品格 + 玩家模型位，整体按 alpha 淡、按 offset 移 */
+    /** 贴原版背包贴图：视觉上就是实机那块 UI */
+    private void blitVanillaInventory(GuiGraphicsExtractor extractor, int x, int y, int w, int h) {
+        try {
+            extractor.blit(AbstractContainerScreen.INVENTORY_LOCATION,
+                    x, y, w, h,
+                    0.0F, 0.0F,
+                    w / INV_TEX, h / INV_TEX);
+        } catch (Throwable t) {
+            // 贴图没画出来也不要紧：下面那层兜底底板还在
+        }
+    }
+
+    /**
+     * 兜底底板：照背包的样子用色块摆一块。
+     *
+     * 原版贴图万一在某个版本上贴不出来，这里至少还能看出"一块背包在淡入淡出"，
+     * 不至于预览区一片空白。
+     */
     private void drawMockInventory(GuiGraphicsExtractor extractor, int x, int y, int w, int h, int alpha) {
         if (alpha <= 1) {
             return;
@@ -372,19 +420,17 @@ public final class UiTransitionsCurveScreen extends Screen {
         extractor.fill(x, y, x + w, y + h, panel);
         extractor.outline(x, y, w, h, withAlpha(COLOR_BORDER, alpha));
 
-        // 玩家小模型的位置（左侧那一块）
-        int dollW = Math.max(12, w / 7);
-        int dollH = Math.max(16, h / 2);
-        extractor.fill(x + 6, y + 6, x + 6 + dollW, y + 6 + dollH, withAlpha(COLOR_DOLL, alpha));
+        int dollW = Math.max(10, w / 7);
+        int dollH = Math.max(14, h / 3);
+        extractor.fill(x + 4, y + 4, x + 4 + dollW, y + 4 + dollH, withAlpha(COLOR_DOLL, alpha));
 
-        // 3 x 9 的物品格
-        int gridX = x + 6 + dollW + 8;
-        int cell = Math.max(7, Math.min(14, (w - (gridX - x) - 12) / 9));
+        int gridX = x + 4 + dollW + 6;
+        int cell = Math.max(6, Math.min(12, (w - (gridX - x) - 8) / 9));
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 9; col++) {
                 int sx = gridX + col * (cell + 1);
                 int sy = y + h / 2 + row * (cell + 1);
-                if (sx + cell > x + w - 4) {
+                if (sx + cell > x + w - 3 || sy + cell > y + h - 3) {
                     continue;
                 }
                 extractor.fill(sx, sy, sx + cell, sy + cell, withAlpha(COLOR_SLOT, alpha));
@@ -399,17 +445,10 @@ public final class UiTransitionsCurveScreen extends Screen {
     // ------------------------------------------------------------------ 拖拽
 
     /**
-     * 点击图上的**任意位置**都会有反应。
+     * 点击图框内**任意位置**都会有反应：抓住最近的那个方块，并立刻挪过去。
      *
-     * 之前是"必须点中那个小方块才能拖"，点在图上别的地方什么都不会发生 ——
-     * 用起来就像"点了没反应"。现在改成：
-     *   · 点在方块附近      → 抓住它，继续拖
-     *   · 点在图上其它位置  → 把**最近的那个**方块挪到点击处，并顺势抓住
-     * 无论点哪里，曲线都会立刻跟着变，反馈是确定的。
-     *
-     * 另外这里**不靠 mouseDragged**：26.3 里 AbstractContainerEventHandler 没有实现
-     * mouseClicked，拖动依赖 MouseHandler 的内部状态，mouseDragged 不保证送到。
-     * 所以按住之后改用 mouseMoved 跟踪（那个是无条件送达的）。
+     * 不靠 mouseDragged：26.3 里 AbstractContainerEventHandler 没有实现 mouseClicked，
+     * 拖动依赖 MouseHandler 的内部状态，不保证送达。按住之后改用 mouseMoved 跟踪。
      */
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
@@ -421,8 +460,6 @@ public final class UiTransitionsCurveScreen extends Screen {
         }
         double mx = event.x();
         double my = event.y();
-        // 前几次点击记一行日志：万一"点了还是没反应"，看日志就能分清是
-        // "点击根本没送到这个界面"还是"送到了但没命中图框"，不用再来回猜
         if (CLICK_LOGGED < 6) {
             CLICK_LOGGED++;
             System.out.println("[UI Transitions] 曲线界面收到左键点击 (" + Math.round(mx) + ","
@@ -434,7 +471,6 @@ public final class UiTransitionsCurveScreen extends Screen {
         }
         int first = distance(mx, my, this.points[0], this.points[1]);
         int second = distance(mx, my, this.points[2], this.points[3]);
-        // 抓住离得近的那个；点在图上别处时，同样是把最近的那个挪过来 —— 行为一致
         this.dragging = first <= second ? 1 : 2;
         applyDrag(mx, my);
         return true;
@@ -485,6 +521,12 @@ public final class UiTransitionsCurveScreen extends Screen {
             this.points[3] = cy;
         }
         syncSliders();      // 图上拖了，滑块跟着走
+    }
+
+    private int distance(double mouseX, double mouseY, float cx, float cy) {
+        double dx = mouseX - toScreenX(cx);
+        double dy = mouseY - toScreenY(cy);
+        return (int) Math.round(Math.sqrt(dx * dx + dy * dy));
     }
 
     /**
@@ -541,11 +583,5 @@ public final class UiTransitionsCurveScreen extends Screen {
                 this.onChange.accept(current());
             }
         }
-    }
-
-    private int distance(double mouseX, double mouseY, float cx, float cy) {
-        double dx = mouseX - toScreenX(cx);
-        double dy = mouseY - toScreenY(cy);
-        return (int) Math.round(Math.sqrt(dx * dx + dy * dy));
     }
 }

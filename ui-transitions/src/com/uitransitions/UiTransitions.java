@@ -973,7 +973,8 @@ public final class UiTransitions {
             return 0.0F;
         }
         long elapsed = System.nanoTime() - veilStartNanos;
-        if (elapsed >= veilDurationNanos) {
+        // 时长为 0 表示"不要这个效果"：直接当作没有遮罩（下限已经放开到 0）
+        if (veilDurationNanos <= 0L || elapsed >= veilDurationNanos) {
             veilActive = false;
             return 0.0F;
         }
@@ -982,9 +983,36 @@ public final class UiTransitions {
         return 1.0F - TransitionConfig.openCurve().easeOut(p);
     }
 
-    /** 画遮罩。界面存在时由 Screen 的收尾注入调用，没有界面时由 HUD 注入调用。 */
-    public static void drawPortalVeil(GuiGraphicsExtractor extractor) {
+    // ================================================================== 自绘预览用的透明度通道
+
+    private static final ThreadLocal<Float> PREVIEW_ALPHA_SAVED = ThreadLocal.withInitial(() -> 1.0F);
+
+    /**
+     * 把接下来几次绘制的透明度交给模组自己的通道（曲线编辑器的预览用）。
+     *
+     * 贴图和色块最终都会经过 BlitRenderState / ColoredRectangleRenderState，
+     * 它们统一读 WINDOW_ALPHA —— 所以这里改一下就能让整个预览一起淡。
+     * 必须配对调用 popPreviewAlpha，否则透明度会泄漏到别的地方。
+     */
+    public static void pushPreviewAlpha(float alpha) {
         try {
+            PREVIEW_ALPHA_SAVED.set(WINDOW_ALPHA.get());
+            WINDOW_ALPHA.set(Math.max(0.0F, Math.min(1.0F, alpha)));
+        } catch (Throwable t) {
+            report("pushPreviewAlpha", t);
+        }
+    }
+
+    public static void popPreviewAlpha() {
+        try {
+            WINDOW_ALPHA.set(PREVIEW_ALPHA_SAVED.get());
+        } catch (Throwable t) {
+            report("popPreviewAlpha", t);
+        }
+    }
+
+    /** 画遮罩。界面存在时由 Screen 的收尾注入调用，没有界面时由 HUD 注入调用。 */
+    public static void drawPortalVeil(GuiGraphicsExtractor extractor) {        try {
             if (!TransitionConfig.enabled()) {
                 return;
             }

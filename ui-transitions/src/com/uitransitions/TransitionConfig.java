@@ -39,10 +39,13 @@ public final class TransitionConfig {
      * 那种界面本来就是一整块地形加载提示，跟着界面上下滑会很怪，
      * 所以默认**只淡入淡出、不位移**，而且比普通界面长一些 —— 免得一闪而过。
      */
-    public static final int DEFAULT_PORTAL_DURATION_MS = 1500;
-    /** 下限给到 300：100ms 的淡变在实机上就是"闪一下"，等于没做（真实日志里出现过 100ms） */
-    public static final int MIN_PORTAL_DURATION_MS = 300;
-    public static final int MAX_PORTAL_DURATION_MS = 10000;
+    public static final int DEFAULT_PORTAL_DURATION_MS = 900;
+    /**
+     * 下限放到 0：0 表示"不要这个过渡效果"。
+     * 上限从 10000 收到 3000 —— 用户反馈 1.5 秒已经嫌长，十秒没有意义。
+     */
+    public static final int MIN_PORTAL_DURATION_MS = 0;
+    public static final int MAX_PORTAL_DURATION_MS = 3000;
 
     private static volatile boolean portalFadeOnly = true;
     private static volatile int portalDurationMs = DEFAULT_PORTAL_DURATION_MS;
