@@ -52,8 +52,6 @@ public final class TransitionConfig {
     private static volatile boolean staggerClose = true;
     private static volatile boolean animateTabSwitch = true;
     private static volatile int tabSwitchMs = 300;
-    private static volatile int tabSlide = 0;
-    private static volatile boolean tabFollowClick = true;
     private static volatile int scrollFadeBand = 200;
     private static volatile int scrollFadeMin = 0;
     private static volatile boolean hidePlayerModelOnClose = true;
@@ -63,6 +61,12 @@ public final class TransitionConfig {
     private static volatile String extraScreens = DEFAULT_EXTRA_SCREENS;
     private static volatile Set<String> extraSet = Collections.emptySet();
     private static volatile String curveId = "cubic";
+    /** 解析好的曲线枚举：curve() 在渲染热路径上，不能每次都解析字符串 */
+    private static volatile Curve curveCache = Curve.CUBIC;
+    /** 上次写盘的完整内容，用来跳过"什么都没变"的重复写 */
+    private static String lastWritten = null;
+    /** 上面那份内容对应的文件路径：换了游戏目录就不能再拿它当"已写过"的依据 */
+    private static String lastWrittenPath = null;
 
     private TransitionConfig() {
     }
@@ -175,7 +179,8 @@ public final class TransitionConfig {
             return;
         }
         Properties properties = new Properties();
-        if (file.isFile()) {
+        boolean existed = file.isFile();
+        if (existed) {
             try (FileInputStream in = new FileInputStream(file)) {
                 properties.load(in);
             } catch (Throwable ignored) {
@@ -202,17 +207,19 @@ public final class TransitionConfig {
         staggerClose = readBoolean(properties, "staggerClose", staggerClose);
         animateTabSwitch = readBoolean(properties, "animateTabSwitch", animateTabSwitch);
         tabSwitchMs = clampTabMs(readInt(properties, "tabSwitchMs", tabSwitchMs));
-        tabSlide = clampTabSlide(readInt(properties, "tabSlide", tabSlide));
-        tabFollowClick = readBoolean(properties, "tabFollowClick", tabFollowClick);
         scrollFadeBand = clampBand(readInt(properties, "scrollFadeBand", scrollFadeBand));
         scrollFadeMin = clampMin(readInt(properties, "scrollFadeMin", scrollFadeMin));
         hidePlayerModelOnClose = readBoolean(properties, "hidePlayerModelOnClose", hidePlayerModelOnClose);
         previewFadeDelay = Math.max(0, Math.min(100, readInt(properties, "previewFadeDelay", previewFadeDelay)));
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
-        curveId = Curve.byId(properties.getProperty("curve", curveId)).id();
+        setCurveIdInternal(properties.getProperty("curve", curveId));
         rebuildSets();
-        save();
+        // 只有在文件本来就不存在时才回写（首次运行生成默认配置）。
+        // 否则"读一次配置"就会重写用户的文件，把注释和未知键全丢掉。
+        if (!existed) {
+            save();
+        }
     }
 
     public static synchronized void save() {
@@ -246,19 +253,36 @@ public final class TransitionConfig {
         properties.setProperty("staggerClose", Boolean.toString(staggerClose));
         properties.setProperty("animateTabSwitch", Boolean.toString(animateTabSwitch));
         properties.setProperty("tabSwitchMs", Integer.toString(tabSwitchMs));
-        properties.setProperty("tabSlide", Integer.toString(tabSlide));
-        properties.setProperty("tabFollowClick", Boolean.toString(tabFollowClick));
         properties.setProperty("scrollFadeBand", Integer.toString(scrollFadeBand));
         properties.setProperty("scrollFadeMin", Integer.toString(scrollFadeMin));
         properties.setProperty("hidePlayerModelOnClose", Boolean.toString(hidePlayerModelOnClose));
         properties.setProperty("previewFadeDelay", Integer.toString(previewFadeDelay));
         properties.setProperty("excludedScreens", excludedScreens == null ? "" : excludedScreens);
         properties.setProperty("extraScreens", extraScreens == null ? "" : extraScreens);
+        String content = renderProperties(properties);
+        String path = file.getPath();
+        if (content.equals(lastWritten) && path.equals(lastWrittenPath)) {
+            return;      // 内容没变就不写盘：配置界面保存时会连续调用二十来次
+        }
         try (FileOutputStream out = new FileOutputStream(file)) {
-            properties.store(out, "UI Transitions - container/menu transition animations");
+            out.write(content.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
         } catch (Throwable ignored) {
             // 写失败不影响游戏
+            return;
         }
+        lastWritten = content;
+        lastWrittenPath = path;
+    }
+
+    /** 渲染成最终写盘字节；单独抽出来是为了"内容相同就跳过写盘" */
+    private static String renderProperties(Properties properties) {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try {
+            properties.store(buffer, "UI Transitions - container/menu transition animations");
+        } catch (Throwable ignored) {
+            return "";
+        }
+        return new String(buffer.toByteArray(), java.nio.charset.StandardCharsets.ISO_8859_1);
     }
 
     public static synchronized void resetToDefaults() {
@@ -282,8 +306,6 @@ public final class TransitionConfig {
         staggerClose = true;
         animateTabSwitch = true;
         tabSwitchMs = 300;
-        tabSlide = 0;
-        tabFollowClick = true;
         scrollFadeBand = 200;
         scrollFadeMin = 0;
         hidePlayerModelOnClose = true;
@@ -291,6 +313,7 @@ public final class TransitionConfig {
         excludedScreens = "";
         extraScreens = DEFAULT_EXTRA_SCREENS;
         curveId = Curve.CUBIC.id();
+        curveCache = Curve.CUBIC;
         rebuildSets();
         save();
     }
@@ -389,27 +412,17 @@ public final class TransitionConfig {
         return animateTabSwitch;
     }
 
-    /** 换页动画时长（毫秒） */
+    /** 换页 / 滚动的原地淡变时长（毫秒） */
     public static int tabSwitchMs() {
         return tabSwitchMs;
     }
 
-    /** 换页时内容横向滑入的距离（像素） */
-    public static int tabSlide() {
-        return tabSlide;
-    }
-
-    /** 滑入方向是否跟随点击位置（关掉则固定从右侧滑入） */
-    public static boolean tabFollowClick() {
-        return tabFollowClick;
-    }
-
-    /** 滚动逐格渐变的渐变带高度（像素）：越大，越靠边的格子越淡 */
+    /** 滚动逐格渐变的渐变带高度（像素）：越大，越靠进入边的格子越淡 */
     public static int scrollFadeBand() {
         return scrollFadeBand;
     }
 
-    /** 滚动逐格渐变的最低透明度（百分比）：越小越明显 */
+    /** 滚动逐格渐变在进入边的最低透明度（百分比）：越小越明显 */
     public static int scrollFadeMin() {
         return scrollFadeMin;
     }
@@ -432,14 +445,15 @@ public final class TransitionConfig {
         return extraScreens == null ? "" : extraScreens;
     }
 
+    /** 热路径：直接返回缓存的枚举，不做字符串解析、不分配 */
     public static Curve curve() {
-        return Curve.byId(curveId);
+        return curveCache;
     }
 
-    /** 每帧都会调用：只做一次 Set 查询，不解析字符串、不加锁 */
+    /** excludedScreens 与 extraScreens 一样按前缀匹配（写包名也能整包排除） */
     public static boolean isExcluded(String className) {
         Set<String> set = excludedSet;
-        return className != null && !set.isEmpty() && set.contains(className);
+        return className != null && !set.isEmpty() && matches(set, className);
     }
 
     /** 额外适配的界面：类名等于某一项，或以其为前缀（因此可以写包名） */
@@ -451,6 +465,10 @@ public final class TransitionConfig {
         if (set.isEmpty()) {
             return false;
         }
+        return matches(set, className);
+    }
+
+    private static boolean matches(Set<String> set, String className) {
         if (set.contains(className)) {
             return true;
         }
@@ -463,11 +481,11 @@ public final class TransitionConfig {
     }
 
     private static void rebuildSets() {
-        excludedSet = parseSet(excludedScreens, false);
-        extraSet = parseSet(extraScreens, false);
+        excludedSet = parseSet(excludedScreens);
+        extraSet = parseSet(extraScreens);
     }
 
-    private static Set<String> parseSet(String value, boolean unused) {
+    private static Set<String> parseSet(String value) {
         if (value == null || value.isBlank()) {
             return Collections.emptySet();
         }
@@ -499,12 +517,21 @@ public final class TransitionConfig {
     }
 
     public static synchronized void setCurve(Curve value) {
-        curveId = (value == null ? Curve.CUBIC : value).id();
+        Curve resolved = value == null ? Curve.CUBIC : value;
+        curveId = resolved.id();
+        curveCache = resolved;
         save();
     }
 
     public static synchronized void setCurveId(String value) {
         setCurve(Curve.byId(value));
+    }
+
+    /** 只写字段不存盘：给 load() 用，避免"读配置"触发一次写盘 */
+    private static void setCurveIdInternal(String value) {
+        Curve resolved = Curve.byId(value);
+        curveId = resolved.id();
+        curveCache = resolved;
     }
 
     public static synchronized void setFade(boolean value) {
@@ -592,16 +619,6 @@ public final class TransitionConfig {
         save();
     }
 
-    public static synchronized void setTabSlide(int value) {
-        tabSlide = clampTabSlide(value);
-        save();
-    }
-
-    public static synchronized void setTabFollowClick(boolean value) {
-        tabFollowClick = value;
-        save();
-    }
-
     public static synchronized void setScrollFadeBand(int value) {
         scrollFadeBand = clampBand(value);
         save();
@@ -657,10 +674,6 @@ public final class TransitionConfig {
 
     private static int clampTabMs(int value) {
         return Math.max(50, Math.min(1000, value));
-    }
-
-    private static int clampTabSlide(int value) {
-        return Math.max(0, Math.min(200, value));
     }
 
     private static float clampJelly(float value) {

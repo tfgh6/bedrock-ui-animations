@@ -33,7 +33,7 @@ public final class UiTransitions {
     /** 物品图标是从图集在提交阶段绘制的，需要记住它被提取时的透明度 */
     private static final Map<Object, Float> ITEM_ALPHAS = new IdentityHashMap<>();
 
-    private static final Map<Screen, Long> OPEN_START = new WeakHashMap<>();
+    private static final Map<Screen, Open> OPEN_START = new WeakHashMap<>();
     private static final Map<Screen, Close> CLOSING = new WeakHashMap<>();
     private static final Set<Screen> FINISHED = Collections.newSetFromMap(new WeakHashMap<>());
 
@@ -53,11 +53,16 @@ public final class UiTransitions {
     private static volatile float FRAME_FADE_ALPHA = 1.0F;
     /** 打开界面时，玩家模型的透明度覆盖值；负数表示不干预 */
     private static volatile float PREVIEW_ALPHA_OVERRIDE = -1.0F;
-    private static final ThreadLocal<Boolean> TAB_PUSHED = ThreadLocal.withInitial(() -> false);
-    /** >0 表示逐格渐变正在进行（值为该次淡变的整体进度） */
-    private static final ThreadLocal<Float> TAB_SLIDE_ACTIVE = ThreadLocal.withInitial(() -> 1.0F);
+    /**
+     * 内容层本帧的淡变透明度，**帧内跨阶段保留**。
+     *
+     * 为什么不能用 FRAME_ALPHA：它在提取阶段结束时就被 endScreenFrame 复位了，
+     * 而画中画是在渲染阶段（GuiRenderer.render → prepare → blitTexture）才贴回界面的，
+     * 那时读 FRAME_ALPHA 只会拿到 1.0 —— 书 / 地图 / 旗帜预览于是完全不淡变。
+     * 帧级复位发生在下一帧的 beginContentLayer，所以这个值在整帧内都有效。
+     */
+    private static volatile float PIP_FRAME_ALPHA = 1.0F;
     private static final ThreadLocal<Boolean> TAB_STATIC = ThreadLocal.withInitial(() -> false);
-    private static final ThreadLocal<Float> TAB_OFFSET = ThreadLocal.withInitial(() -> 0.0F);
     /**
      * 物品/画中画走的是预乘 alpha 管线（GUI_TEXTURED_PREMULTIPLIED_ALPHA）：
      * 颜色通道本应已经乘过 alpha。只改 alpha 而不动 RGB，元素就会比周围偏亮
@@ -66,25 +71,39 @@ public final class UiTransitions {
     private static final ThreadLocal<Boolean> PREMULTIPLIED = ThreadLocal.withInitial(() -> false);
     /** 本帧的动画透明度：物品渲染状态没登记到（例如状态是在动画开始前建立的）就退回这个值 */
     private static final ThreadLocal<Float> FRAME_ALPHA = ThreadLocal.withInitial(() -> 1.0F);
+    /**
+     * 当前背景层用的提取器。
+     *
+     * 字幕（Hud.extractDeferredSubtitles）是在背景层内部被调用的，但它自己没有
+     * extractor 参数；把当前这个存下来，就能在 Hud 内部统一抵消位移，
+     * 从而覆盖所有调用点（Screen / PauseScreen / LoadingOverlay），
+     * 而不是只在 Screen.extractBackground 这一个调用点上打补丁。
+     */
+    private static final ThreadLocal<GuiGraphicsExtractor> BACKGROUND_EXTRACTOR = new ThreadLocal<>();
 
-    /** 创造模式分类标签等"换页"动画：记录每屏的开始时间与方向 */
+    /** 创造模式分类标签等"换页"动画：记录每屏的开始时间与滚动方向 */
     private static final Map<Screen, TabSwitch> TAB_SWITCH = new WeakHashMap<>();
     /** 每个界面上一帧的滚动位置，用来判断列表是否真的滚动了 */
     private static final Map<Screen, Float> LAST_SCROLL = new WeakHashMap<>();
-    /** 滚动方向：+1 = 内容向上走（新物品从下方进入），-1 = 反向 */
-    private static volatile float scrollDirection = 1.0F;
-    /** 逐格渐变带的高度（像素）：越靠近进入侧越淡 */
-    /** 快捷栏槽位在菜单里的索引（36-44）：这一排固定为原版观感，不参与任何淡变 */
-    private static final int HOTBAR_FIRST = 36;
-    private static final int HOTBAR_LAST = 44;
-    private static final ThreadLocal<Float> SLOT_SAVED_ALPHA = new ThreadLocal<>();
-    private static final ThreadLocal<Integer> SLOT_SLIDE_DEPTH = ThreadLocal.withInitial(() -> 0);
-    /** 本帧观察到的格子区上下界（上一帧的值用于计算，避免同帧内互相打架） */
+    /**
+     * 本帧观察到的格子区上下界（像素）。
+     * 用**上一帧**的值来算渐变，避免同一帧里边画边改导致前面的格子跟着变。
+     */
     private static final Map<Screen, float[]> GRID_BOUNDS = new WeakHashMap<>();
+    /** 本帧正在累积的格子区上下界 */
     private static final ThreadLocal<float[]> GRID_BOUNDS_NOW = ThreadLocal.withInitial(() -> null);
-    /** 逐格渐变时新格额外上滑的距离（像素） */
-    private static final float SLOT_SLIDE_PX = 22.0F;
-    /** 换页动画时长（毫秒）与横向位移（GUI 像素） */
+    /** 保存逐格淡变前的透明度，供 endSlotFade 还原 */
+    private static final ThreadLocal<Float> SLOT_SAVED_ALPHA = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> SLOT_FADED = ThreadLocal.withInitial(() -> false);
+    /**
+     * 当前正在做"原地淡变"的界面，由 beginTabContent 登记。
+     *
+     * 不能用 PUSHED_SCREEN：那个只在**打开/关闭动画进行中**才被赋值，
+     * 而点标签/滚动发生在界面早已静止之后 —— 用它会导致逐格淡变整块失效。
+     * beginTabContent 挂在 CreativeModeInventoryScreen.extractRenderState 的 HEAD 上，
+     * 每帧都会跑，且包住了槽位绘制，正好是需要的范围。
+     */
+    private static final ThreadLocal<Screen> IN_PLACE_SCREEN = new ThreadLocal<>();
 
 
     private static final Set<String> REPORTED = ConcurrentHashMap.newKeySet();
@@ -131,9 +150,10 @@ public final class UiTransitions {
                     return true;                       // 已经在关闭中：继续拦着，不重启动画
                 }
                 // 打开动画还没播完就关闭：按当前可见透明度反解关闭曲线的进度，接着往下走
+                long closeDuration = durationNanos();
                 long backdate = backdateNanos(
-                        solveProgress(TransitionConfig.curve(), visualAlpha(current), true));
-                CLOSING.put(current, new Close(now - backdate, null));
+                        solveProgress(TransitionConfig.curve(), visualAlpha(current), true), closeDuration);
+                CLOSING.put(current, new Close(now - backdate, closeDuration, null));
                 OPEN_START.remove(current);
                 FINISHED.remove(current);
                 // 关闭动画期间把鼠标交还给游戏，让玩家可以立刻转视角（配置可关）
@@ -151,13 +171,14 @@ public final class UiTransitions {
             }
             if (target != null && shouldAnimate(target)) {
                 // 之前正在关闭这个界面（重新打开）：同样按当前透明度接续
+                long openDuration = durationNanos();
                 long backdate = 0L;
                 if (CLOSING.containsKey(target)) {
                     backdate = backdateNanos(
-                            solveProgress(TransitionConfig.curve(), visualAlpha(target), false));
+                            solveProgress(TransitionConfig.curve(), visualAlpha(target), false), openDuration);
                     CLOSING.remove(target);
                 }
-                OPEN_START.put(target, now - backdate);
+                OPEN_START.put(target, new Open(now - backdate, openDuration));
                 FINISHED.remove(target);
             }
             return false;
@@ -182,7 +203,7 @@ public final class UiTransitions {
             if (close == null) {
                 return;
             }
-            if (System.nanoTime() - close.startNanos < durationNanos()) {
+            if (System.nanoTime() - close.startNanos() < close.durationNanos()) {
                 return;
             }
             CLOSING.remove(current);
@@ -226,6 +247,7 @@ public final class UiTransitions {
             }
             beginLayer(screen, extractor, progress, false);
             BACKGROUND_PUSHED.set(true);
+            BACKGROUND_EXTRACTOR.set(extractor);      // 供 Hud 里的字幕抵消使用
         } catch (Throwable t) {
             report("beginBackgroundLayer", t);
         }
@@ -241,8 +263,9 @@ public final class UiTransitions {
             WINDOW_ALPHA.set(1.0F);
         } catch (Throwable t) {
             BACKGROUND_PUSHED.set(false);
-            WINDOW_ALPHA.set(1.0F);
             report("endBackgroundLayer", t);
+        } finally {
+            BACKGROUND_EXTRACTOR.remove();
         }
     }
 
@@ -251,16 +274,18 @@ public final class UiTransitions {
     /** 内容层开始：槽内物品、标题文字等。 */
     public static void beginContentLayer(Screen screen, GuiGraphicsExtractor extractor) {
         FRAME_FADE_ALPHA = 1.0F;      // 新的一帧开始
+        PIP_FRAME_ALPHA = 1.0F;
         // 只针对背包/容器界面里的玩家模型；书、地图等其它画中画预览照旧渐隐
         boolean container = screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
         HIDE_PREVIEW = isClosing(screen) && container;
         PREVIEW_ALPHA_OVERRIDE = -1.0F;
         if (container && !HIDE_PREVIEW) {
             try {
-                Long started = OPEN_START.get(screen);
-                if (started != null) {
-                    float ms = Math.max(1.0F, TransitionConfig.durationMs());
-                    float progress = (System.nanoTime() - started) / (ms * 1_000_000.0F);
+                Open open = OPEN_START.get(screen);
+                if (open != null) {
+                    // 用这一段动画自己的时长，和 progress() 保持一致
+                    float progress = (System.nanoTime() - open.startNanos())
+                            / (float) open.durationNanos();
                     // 先等一小会儿（约 35% 时长）再淡入，避免和界面一起冒出来显得突兀
                     float delay = TransitionConfig.previewFadeDelay() / 100.0F;
                     float delayed = (progress - delay) / Math.max(0.05F, 1.0F - delay);
@@ -329,6 +354,7 @@ public final class UiTransitions {
         LAYER_ALPHA.set(alpha);
         WINDOW_ALPHA.set(alpha);
         FRAME_ALPHA.set(alpha);
+        PIP_FRAME_ALPHA = alpha;       // 帧级：渲染阶段贴画中画时还要用
         Matrix3x2fStack pose = extractor.pose();
         pose.pushMatrix();
         pose.translate(0.0F, shift);
@@ -376,10 +402,16 @@ public final class UiTransitions {
     /**
      * 音效字幕：顺带在背景层里绘制，默认既不平移也不淡出
      * （否则打开背包时字幕会跟着一起动）。animateSubtitles=true 时让它一起动画。
+     *
+     * 这一对由 HotbarTabExcludeMixin 注入在 {@code Hud.extractDeferredSubtitles} 上，
+     * 因此 Screen / PauseScreen / LoadingOverlay 这些调用点都被覆盖 —— 早期版本只在
+     * Screen.extractBackground 的调用点做抵消，暂停菜单自己重写了该方法，字幕照样会动。
      */
-    public static void pauseForHud(GuiGraphicsExtractor extractor) {
+    public static void pauseForHud() {
         try {
-            if (!BACKGROUND_PUSHED.get() || HUD_PAUSED.get() || TransitionConfig.animateSubtitles()) {
+            GuiGraphicsExtractor extractor = BACKGROUND_EXTRACTOR.get();
+            if (extractor == null || !BACKGROUND_PUSHED.get() || HUD_PAUSED.get()
+                    || TransitionConfig.animateSubtitles()) {
                 return;
             }
             float shift = LAYER_SHIFT.get();
@@ -393,14 +425,15 @@ public final class UiTransitions {
         }
     }
 
-    public static void resumeAfterHud(GuiGraphicsExtractor extractor) {
+    public static void resumeAfterHud() {
         try {
             if (!HUD_PAUSED.get()) {
                 return;
             }
             HUD_PAUSED.set(false);
+            GuiGraphicsExtractor extractor = BACKGROUND_EXTRACTOR.get();
             float shift = LAYER_SHIFT.get();
-            if (shift != 0.0F) {
+            if (extractor != null && shift != 0.0F) {
                 extractor.pose().translate(0.0F, shift);
             }
             WINDOW_ALPHA.set(LAYER_ALPHA.get());
@@ -535,112 +568,175 @@ public final class UiTransitions {
      * 它们会被误当成动画的一部分跟着淡出，动画结束后又突然弹回来。
      * 界面自身的物品已在提取阶段登记在册，各自生效，不受这次复位影响。
      */
-    /** 分类标签被点选：记一次换页动画（方向由鼠标在标签栏的左右位置决定） */
+    /** 分类标签被点选：记一次均匀淡入（scrollDirection = 0） */
     public static void onTabSelected(Screen screen) {
         try {
             TransitionConfig.ensureLoaded();
             if (screen == null || !TransitionConfig.animateTabSwitch()) {
                 return;
             }
-            boolean fromLeft = TransitionConfig.tabFollowClick() && pointerOnLeftHalf();
-            TAB_SWITCH.put(screen, new TabSwitch(System.nanoTime(), fromLeft ? 1.0F : -1.0F));
+            TAB_SWITCH.put(screen, new TabSwitch(System.nanoTime(), 0.0F));
+            GRID_BOUNDS.remove(screen);
         } catch (Throwable t) {
             report("onTabSelected", t);
         }
     }
 
     /**
-     * 滚动物品列表（滚轮或拖动滚动条）：启动一次淡入。
-     * 拖动是每帧触发的，如果每次都重置起点，物品会一直停在近乎空白的状态 —— 所以进行中就不重置。
-     */
-    /**
-     * 每帧调用：只有滚动位置**真的变了**才启动淡变。
-     * 不能挂在输入事件上 —— 手机上每次点击都会被映射成拖动事件，那样会点哪里都闪。
+     * 每帧调用：只有滚动位置**真的变了**才启动逐格渐变。
+     *
+     * 不能挂在输入事件上 —— 手机上每次点击都会被映射成拖动事件，那样点哪里都会闪。
+     * 拖动是每帧触发滚动量的，如果每次都重置起点，物品会一直停在近乎空白的状态，
+     * 所以进行中就不重置。
      */
     public static void onGridScrollIfChanged(Screen screen, float scrollOffs) {
-        try {
-            Float previous = LAST_SCROLL.get(screen);
-            LAST_SCROLL.put(screen, scrollOffs);
-            if (previous == null || Math.abs(previous - scrollOffs) < 0.0005F) {
-                return;
-            }
-            scrollDirection = scrollOffs > previous ? 1.0F : -1.0F;
-            onGridScroll(screen);
-        } catch (Throwable t) {
-            report("onGridScrollIfChanged", t);
-        }
-    }
-
-    public static void onGridScroll(Screen screen) {
         try {
             TransitionConfig.ensureLoaded();
             if (screen == null || !TransitionConfig.animateTabSwitch()) {
                 return;
             }
+            Float previous = LAST_SCROLL.get(screen);
+            LAST_SCROLL.put(screen, scrollOffs);
+            if (previous == null || Math.abs(previous - scrollOffs) < 0.0005F) {
+                return;      // 没真的滚动
+            }
+            float direction = scrollOffs > previous ? 1.0F : -1.0F;
             TabSwitch existing = TAB_SWITCH.get(screen);
             if (existing != null
-                    && (System.nanoTime() - existing.startNanos)
+                    && (System.nanoTime() - existing.startNanos())
                     < TransitionConfig.tabSwitchMs() * 1_000_000L) {
-                return;
+                return;      // 上一段还没播完，别一直重置起点
             }
-            TAB_SWITCH.put(screen, new TabSwitch(System.nanoTime(), 0.0F));
+            TAB_SWITCH.put(screen, new TabSwitch(System.nanoTime(), direction));
         } catch (Throwable t) {
-            report("onGridScroll", t);
+            report("onGridScrollIfChanged", t);
         }
     }
 
-    /** 鼠标是否在屏幕左半边（用来决定内容从哪一侧滑入） */
-    private static boolean pointerOnLeftHalf() {
+    /** 当前界面是否正处在"原地淡变"窗口（标签切换 / 滚动），返回整体进度；1 = 不介入 */
+    private static float inPlaceFadeProgress(Screen screen) {
+        TabSwitch state = screen == null ? null : TAB_SWITCH.get(screen);
+        if (state == null) {
+            return 1.0F;
+        }
+        float ms = Math.max(50, TransitionConfig.tabSwitchMs()) * 1_000_000.0F;
+        return clamp01((System.nanoTime() - state.startNanos()) / ms);
+    }
+
+    /**
+     * 逐槽位的透明度。
+     *
+     * @param pinToVanilla true = 这一格固定为原版观感（玩家快捷栏那一排），完全不参与淡变
+     * @param slotY        槽位的纵坐标，用来算"离进入边多远"
+     *
+     * 两种情形共用一条公式：alpha = base + (1 - base) * eased
+     *   · 点标签：base 是全区域统一的 FADE_FLOOR，整片柔和浮现
+     *   · 滚动  ：base 按槽位离进入边的距离逐格变化，越靠进入边越淡
+     * 用"从 base 升到 1"而不是从 0 开始，是为了避免整片透明闪一下。
+     */
+    public static void beginSlotFade(boolean pinToVanilla, int slotY) {
         try {
-            Minecraft minecraft = Minecraft.getInstance();
-            Object handler = minecraft.mouseHandler;
-            Object x = handler.getClass().getMethod("xpos").invoke(handler);
-            double value = ((Number) x).doubleValue();
-            return value < minecraft.getWindow().getGuiScaledWidth() / 2.0;
+            SLOT_FADED.set(false);
+            Screen screen = IN_PLACE_SCREEN.get();
+            float progress = inPlaceFadeProgress(screen);
+            if (progress >= 1.0F || !TransitionConfig.fade()) {
+                return;      // 不在原地淡变窗口里：什么都不做
+            }
+            SLOT_SAVED_ALPHA.set(WINDOW_ALPHA.get());
+            SLOT_FADED.set(true);
+            if (pinToVanilla) {
+                // 玩家快捷栏：固定原版，既不淡也不动
+                WINDOW_ALPHA.set(1.0F);
+                FRAME_ALPHA.set(1.0F);
+                return;
+            }
+            float eased = TransitionConfig.curve().easeOut(progress);
+            float base = slotFloorAlpha(screen, slotY);
+            float alpha = base + (1.0F - base) * eased;
+            WINDOW_ALPHA.set(alpha);
+            FRAME_ALPHA.set(alpha);
         } catch (Throwable t) {
-            return false;      // 取不到就当右侧滑入
+            report("beginSlotFade", t);
+        }
+    }
+
+    public static void endSlotFade(int slotY) {
+        try {
+            if (!SLOT_FADED.get()) {
+                return;
+            }
+            Float saved = SLOT_SAVED_ALPHA.get();
+            if (saved != null) {
+                WINDOW_ALPHA.set(saved);
+                FRAME_ALPHA.set(saved);
+            }
+            noteGridSlot(slotY);
+        } catch (Throwable t) {
+            report("endSlotFade", t);
+        }
+    }
+
+    /** 这一格淡变的起点透明度：标签切换 = 统一下限；滚动 = 按离进入边的距离逐格变化 */
+    private static float slotFloorAlpha(Screen screen, int slotY) {
+        TabSwitch state = screen == null ? null : TAB_SWITCH.get(screen);
+        if (state == null || state.scrollDirection() == 0.0F) {
+            return FADE_FLOOR;                       // 点标签：全区域统一
+        }
+        float[] bounds = GRID_BOUNDS.get(screen);
+        if (bounds == null) {
+            return FADE_FLOOR;                       // 还没有上一帧的边界：先按统一下限来
+        }
+        // 进入侧：向下滚时物品往上走，新格从**底部**进来，所以离底部越近越淡
+        float enterEdge = state.scrollDirection() > 0.0F ? bounds[1] : bounds[0];
+        float distance = Math.abs(slotY - enterEdge);
+        float band = Math.max(1.0F, TransitionConfig.scrollFadeBand());
+        float minAlpha = Math.max(0.0F, Math.min(1.0F, TransitionConfig.scrollFadeMin() / 100.0F));
+        float ratio = clamp01(distance / band);
+        return minAlpha + (1.0F - minAlpha) * ratio;
+    }
+
+    /** 记录本帧格子区的上下界（供下一帧算渐变） */
+    private static void noteGridSlot(int slotY) {
+        float[] now = GRID_BOUNDS_NOW.get();
+        if (now == null) {
+            GRID_BOUNDS_NOW.set(new float[] { slotY, slotY });
+        } else {
+            now[0] = Math.min(now[0], slotY);
+            now[1] = Math.max(now[1], slotY);
         }
     }
 
     /** 换页动画：只包内容层，底板与标签栏在背景层、天然不动 */
     public static void beginTabContent(Screen screen, GuiGraphicsExtractor extractor) {
         try {
-            if (screen == null) {
+            // 先登记当前界面：SlotFadeMixin 靠它知道"这一格属于哪个界面"，
+            // 即使界面早已静止、没有打开/关闭动画也必须能取到。
+            IN_PLACE_SCREEN.set(screen);
+            if (screen == null || TAB_SWITCH.get(screen) == null) {
                 return;
             }
-            TabSwitch state = TAB_SWITCH.get(screen);
-            if (state == null) {
-                return;
-            }
-            float progress = (System.nanoTime() - state.startNanos) / (TransitionConfig.tabSwitchMs() * 1_000_000.0F);
+            float progress = inPlaceFadeProgress(screen);
             if (progress >= 1.0F) {
                 TAB_SWITCH.remove(screen);
                 return;
             }
-            float eased = TransitionConfig.curve().easeOut(Math.max(0.0F, progress));
+            float eased = TransitionConfig.curve().easeOut(progress);
             // 标签切换 / 滚动只做淡变，**不做任何位移**。
-            // 关键：从"下限"开始而不是从 0 开始 —— 整片透明会像闪一下，
-            // 从 0.62 淡到 1 只是一次柔和的浮现。
             float alpha = TransitionConfig.fade() ? (FADE_FLOOR + (1.0F - FADE_FLOOR) * eased) : 1.0F;
             WINDOW_ALPHA.set(alpha);
             FRAME_ALPHA.set(alpha);
-            TAB_OFFSET.set(0.0F);
-            TAB_SLIDE_ACTIVE.set(eased);   // 逐格渐变随整体淡变一起推进
             FRAME_FADE_ALPHA = alpha;      // 帧级：界面画完后 HUD 快捷栏还能读到
+            PIP_FRAME_ALPHA = alpha;
         } catch (Throwable t) {
             report("beginTabContent", t);
         }
     }
 
-    /** 快捷栏：在换页动画期间抵消横向位移（底部那排格子不该跟着滑） */
+    /** 快捷栏：在换页动画期间保持原版观感（不跟着一起淡） */
     public static void pauseForTabStatic(GuiGraphicsExtractor extractor) {
         try {
             if (FRAME_FADE_ALPHA >= 0.999F || TAB_STATIC.get()) {
                 return;
-            }
-            float offset = TAB_OFFSET.get();
-            if (offset != 0.0F) {
-                extractor.pose().translate(-offset, 0.0F);
             }
             WINDOW_ALPHA.set(1.0F);
             FRAME_ALPHA.set(1.0F);
@@ -656,96 +752,26 @@ public final class UiTransitions {
                 return;
             }
             TAB_STATIC.set(false);
-            float offset = TAB_OFFSET.get();
-            if (offset != 0.0F) {
-                extractor.pose().translate(offset, 0.0F);
-            }
         } catch (Throwable t) {
             TAB_STATIC.set(false);
             report("resumeAfterTabStatic", t);
         }
     }
 
-    /**
-     * 逐格渐变：按槽位的纵坐标算透明度。
-     * 新物品从下方进入时，越靠下越淡；从上往下滚时则以顶部为进入侧。
-     */
-    public static void applySlotFade(GuiGraphicsExtractor extractor, int slotY, boolean inGrid) {
-        try {
-            if (!inGrid) {
-                return;      // 玩家背包那几排不滚动：永远保持原版观感
-            }
-            float bandAlpha = activeSlotFadeAlpha();
-            if (bandAlpha >= 0.999F) {
-                return;
-            }
-            // 进入侧：向下滚动时物品向上走，新格从**底部**进来（所以离底部越近越淡）
-            float[] bounds = GRID_BOUNDS.get(PUSHED_SCREEN.get());
-            float enterEdge = bounds == null ? slotY
-                    : (scrollDirection > 0 ? bounds[1] : bounds[0]);
-            float distance = Math.abs(slotY - enterEdge);
-            float band = Math.max(1.0F, TransitionConfig.scrollFadeBand());
-            float minAlpha = TransitionConfig.scrollFadeMin() / 100.0F;
-            float ratio = Math.max(0.0F, Math.min(1.0F, distance / band));
-            float alpha = minAlpha + (1.0F - minAlpha) * ratio;
-            alpha = Math.max(alpha, bandAlpha);
-            noteGridSlot(slotY);
-            SLOT_SAVED_ALPHA.set(WINDOW_ALPHA.get());
-            WINDOW_ALPHA.set(alpha);
-            FRAME_ALPHA.set(alpha);
-            // 逐格位移已永久撤除：在这套渲染管线里推送与弹栈时机对不上，会导致整片漂移
-        } catch (Throwable t) {
-            report("applySlotFade", t);
-        }
-    }
-
-    public static void clearSlotFade(GuiGraphicsExtractor extractor) {
-        try {
-            // 不再需要弹栈（已无位移）
-            Float saved = SLOT_SAVED_ALPHA.get();
-            if (saved != null) {
-                SLOT_SAVED_ALPHA.remove();
-                WINDOW_ALPHA.set(saved);
-                FRAME_ALPHA.set(saved);
-            }
-        } catch (Throwable t) {
-            report("clearSlotFade", t);
-        }
-    }
-
-    /** 记录本帧格子区的上下界 */
-    private static void noteGridSlot(int slotY) {
-        float[] now = GRID_BOUNDS_NOW.get();
-        if (now == null) {
-            now = new float[] { slotY, slotY };
-            GRID_BOUNDS_NOW.set(now);
-        } else {
-            now[0] = Math.min(now[0], slotY);
-            now[1] = Math.max(now[1], slotY);
-        }
-    }
-
-    /** 当前是否处于逐格渐变窗口；返回整体的淡变透明度（1 = 不介入） */
-    private static float activeSlotFadeAlpha() {
-        return TAB_SLIDE_ACTIVE.get();
-    }
-
     public static void endTabContent(Screen screen, GuiGraphicsExtractor extractor) {
         try {
-            if (TAB_PUSHED.get()) {
-                extractor.pose().popMatrix();
-                TAB_PUSHED.set(false);
-            }
-            TAB_SLIDE_ACTIVE.set(1.0F);
             float[] now = GRID_BOUNDS_NOW.get();
             if (now != null && screen != null) {
                 GRID_BOUNDS.put(screen, now);
             }
             GRID_BOUNDS_NOW.remove();
+            SLOT_SAVED_ALPHA.remove();
+            SLOT_FADED.set(false);
+            IN_PLACE_SCREEN.remove();
             WINDOW_ALPHA.set(1.0F);
             FRAME_ALPHA.set(1.0F);
         } catch (Throwable t) {
-            TAB_PUSHED.set(false);
+            IN_PLACE_SCREEN.remove();
             report("endTabContent", t);
         }
     }
@@ -764,8 +790,11 @@ public final class UiTransitions {
     }
 
     /**
-     * 画中画内容（背包里的玩家小模型、书、地图预览等）在渲染阶段贴回界面，
-     * 此时本帧的动画透明度保存在 FRAME_ALPHA 里，把它交给贴图即可一起渐变。
+     * 画中画内容（背包里的玩家小模型、书、地图预览等）在渲染阶段贴回界面。
+     *
+     * 注意时序：画中画是在提取阶段产出渲染状态、在渲染阶段（GuiRenderer.render →
+     * preparePictureInPicture → blitTexture）才真正贴回去的。所以这里读的是
+     * PIP_FRAME_ALPHA —— 它跨阶段保留到下一帧开始。
      */
     public static void beginPipBlit(Object state) {
         try {
@@ -782,7 +811,7 @@ public final class UiTransitions {
                 PIP_BLITTING.set(true);
                 return;
             }
-            WINDOW_ALPHA.set(FRAME_ALPHA.get());
+            WINDOW_ALPHA.set(PIP_FRAME_ALPHA);
             PIP_BLITTING.set(true);
         } catch (Throwable t) {
             report("beginPipBlit", t);
@@ -869,30 +898,38 @@ public final class UiTransitions {
         return (lo + hi) / 2.0F;
     }
 
-    /** 把"进度"换算成需要回拨的时间（毫秒 → 纳秒） */
-    private static long backdateNanos(float progress) {
+    /** 把"进度"换算成需要回拨的时间（毫秒 → 纳秒），时长取即将开始的那次动画的 */
+    private static long backdateNanos(float progress, long durationNanos) {
         float clamped = Math.max(0.0F, Math.min(1.0F, progress));
         if (clamped <= 0.0001F) {
             return 0L;
         }
-        return (long) (clamped * durationNanos());
+        return (long) (clamped * durationNanos);
     }
 
+    /**
+     * 动画进度 0..1。
+     *
+     * 每次都换算成"这一段动画自己的时长"：不能在动画进行中读当前的 durationMs ——
+     * 用户在配置界面把时长从 200 调到 2000 再关掉配置界面时，
+     * 正在进行的那段动画会突然按新时长重新换算，进度会跳变（表现为动画倒退或直接闪完）。
+     * 同理，打断接续时的回拨也必须用同一个时长，否则新动画的起点是错的。
+     */
     private static float progress(Screen screen) {
         long now = System.nanoTime();
         Close close = CLOSING.get(screen);
         if (close != null) {
-            return clamp01((now - close.startNanos) / (float) durationNanos());
+            return clamp01((now - close.startNanos) / (float) close.durationNanos());
         }
         if (FINISHED.contains(screen)) {
             return 1.0F;
         }
-        Long start = OPEN_START.get(screen);
-        if (start == null) {
-            OPEN_START.put(screen, now);
+        Open open = OPEN_START.get(screen);
+        if (open == null) {
+            OPEN_START.put(screen, new Open(now, durationNanos()));
             return 0.0F;
         }
-        return clamp01((now - start) / (float) durationNanos());
+        return clamp01((now - open.startNanos()) / (float) open.durationNanos());
     }
 
     /**
@@ -964,12 +1001,22 @@ public final class UiTransitions {
         }
     }
 
-    /** 关闭动画的状态 */
-    private record Close(long startNanos, Screen target) {
+    /** 打开动画的状态：起点 + 这一段动画自己的时长 */
+    private record Open(long startNanos, long durationNanos) {
     }
 
-    /** 换页动画状态：起始时间 + 方向（+1 = 从左侧滑入，-1 = 从右侧滑入） */
-    private record TabSwitch(long startNanos, float direction) {
+    /** 关闭动画的状态 */
+    private record Close(long startNanos, long durationNanos, Screen target) {
+    }
+
+    /**
+     * 原地淡变的状态。
+     *
+     * @param startNanos      起始时间
+     * @param scrollDirection 0 = 点标签（整个物品区均匀淡入）；
+     *                        +1 / -1 = 滚轮或拖动方向（逐格渐变，进入边随之切换）
+     */
+    private record TabSwitch(long startNanos, float scrollDirection) {
     }
 
     public static String status() {

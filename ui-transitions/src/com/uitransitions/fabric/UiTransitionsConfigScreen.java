@@ -160,16 +160,32 @@ public final class UiTransitionsConfigScreen {
         layers.addEntry(entries.startBooleanToggle(
                         Component.literal("分类标签切换动画（创造模式）"), TransitionConfig.animateTabSwitch())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("点创造模式物品栏的分类标签时，物品区从点击方向滑入并淡入。"),
-                        Component.literal("底板、标签栏、玩家小模型保持不动"))
+                .setTooltip(Component.literal("点创造模式物品栏的分类标签时，物品区原地淡入（不做位移）。"),
+                        Component.literal("底板、标签栏、快捷栏、玩家小模型都保持不动"))
                 .setSaveConsumer(TransitionConfig::setAnimateTabSwitch)
                 .build());
 
         layers.addEntry(entries.startIntSlider(Component.literal("标签切换时长（毫秒）"),
                         TransitionConfig.tabSwitchMs(), 50, 1000)
                 .setDefaultValue(300)
-                .setTooltip(Component.literal("换页动画持续多久，默认 220（比开关界面的 300 更利落）"))
+                .setTooltip(Component.literal("换页动画持续多久，默认 300；调短一些会更利落"))
                 .setSaveConsumer(TransitionConfig::setTabSwitchMs)
+                .build());
+
+        layers.addEntry(entries.startIntSlider(Component.literal("滚动渐变带高度（像素）"),
+                        TransitionConfig.scrollFadeBand(), 16, 300)
+                .setDefaultValue(200)
+                .setTooltip(Component.literal("滚动物品列表时，多高范围内的格子参与逐格渐变。"),
+                        Component.literal("越大越明显；只想轻微提示就往小调"))
+                .setSaveConsumer(TransitionConfig::setScrollFadeBand)
+                .build());
+
+        layers.addEntry(entries.startIntSlider(Component.literal("滚动渐变最低透明度（%）"),
+                        TransitionConfig.scrollFadeMin(), 0, 100)
+                .setDefaultValue(0)
+                .setTooltip(Component.literal("滚动时刚进入视野那一侧最淡到什么程度。"),
+                        Component.literal("0 = 完全淡出（默认）；调高会含蓄一些"))
+                .setSaveConsumer(TransitionConfig::setScrollFadeMin)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
@@ -181,9 +197,9 @@ public final class UiTransitionsConfigScreen {
 
         layers.addEntry(entries.startBooleanToggle(
                         Component.literal("同类界面切换也做动画"), TransitionConfig.animateSameTypeSwitch())
-                .setDefaultValue(false)
-                .setTooltip(Component.literal("创造模式物品栏切换分类标签、配方书翻页这类同界面换页，默认直接切换、不做动画。"),
-                        Component.literal("打开后它们也会滑入滑出"))
+                .setDefaultValue(true)
+                .setTooltip(Component.literal("创造模式物品栏切换分类标签、配方书翻页这类同界面换页，"),
+                        Component.literal("默认也会做过渡动画；关掉则直接切换"))
                 .setSaveConsumer(TransitionConfig::setAnimateSameTypeSwitch)
                 .build());
 
@@ -228,7 +244,8 @@ public final class UiTransitionsConfigScreen {
                         Component.literal("排除的界面（类名或包名，逗号分隔）"),
                         TransitionConfig.excludedScreens())
                 .setDefaultValue("")
-                .setTooltip(Component.literal("某个界面表现异常时可以把它排除，例如 com.example.FooScreen"))
+                .setTooltip(Component.literal("某个界面表现异常时可以把它排除，按前缀匹配。"),
+                        Component.literal("可以写完整类名 com.example.FooScreen，也可以只写包名 com.example"))
                 .setSaveConsumer(TransitionConfig::setExcludedScreens)
                 .build());
 

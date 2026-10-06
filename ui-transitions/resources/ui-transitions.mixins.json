@@ -13,8 +13,11 @@
     "GuiItemRenderStateMixin",
     "GuiRendererMixin",
     "PictureInPictureRendererMixin",
+    "OversizedItemRendererMixin",
     "CreativeTabSwitchMixin",
-    "HotbarTabExcludeMixin"
+    "SlotFadeMixin",
+    "HotbarTabExcludeMixin",
+    "HudSubtitleMixin"
   ],
   "injectors": {
     "defaultRequire": 0

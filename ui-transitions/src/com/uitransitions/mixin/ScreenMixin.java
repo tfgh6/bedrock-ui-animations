@@ -20,8 +20,17 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * extractBackground 并调用别的重载 —— 于是那些没被抵消的底衬/压暗就被平移带走了，
  * 表现为动画中有一条暗色横带被推出屏幕。
  *
- * 现在改成**在方法内部**抵消：给每一个背景绘制方法各自包一层 HEAD/RETURN，
- * 于是无论谁调用、走哪个重载，都被覆盖。
+ * 现在改成**在方法内部**抵消：给 Screen 自己的每一个背景绘制方法包一层 HEAD/RETURN。
+ *
+ * 已知边界：这只覆盖 Screen 声明的方法。子类若**覆写**了这些方法，覆写体不会经过这里
+ * （WinScreen / WorldOptionsScreen / StatsScreen / CreateWorldScreen 覆写了
+ * extractMenuBackground，DebugOptionsScreen 覆写了 extractBlurredBackground，
+ * TitleScreen / GenericMessageScreen / LevelLoadingScreen 覆写了 extractPanorama）。
+ * 那些界面只有开了 animateAllScreens 才会参与动画，属于已知的可接受范围；
+ * 容器界面这条主路径不受影响（它们的 extractBackground 最终仍会落到 Screen 的实现）。
+ *
+ * 字幕不再在这里处理：它由 HudSubtitleMixin 直接挂在 Hud.extractDeferredSubtitles 上，
+ * 那样才能覆盖 PauseScreen / LoadingOverlay 这些自己调用字幕的界面。
  */
 @Mixin(Screen.class)
 public abstract class ScreenMixin {
@@ -34,12 +43,6 @@ public abstract class ScreenMixin {
 
     private static final String CONTENT_CALL =
             "Lnet/minecraft/client/gui/screens/Screen;extractRenderState(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIF)V";
-
-    private static final String SUBTITLE_CALL =
-            "Lnet/minecraft/client/gui/Hud;extractDeferredSubtitles()V";
-
-    private static final String BACKGROUND_METHOD =
-            "extractBackground(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIF)V";
 
     // ------------------------------------------------------------------ 层次窗口
 
@@ -154,19 +157,5 @@ public abstract class ScreenMixin {
     @Inject(method = "extractPanorama(Lnet/minecraft/client/gui/GuiGraphicsExtractor;F)V", at = @At("RETURN"))
     private void uiTransitions$panoramaEnd(GuiGraphicsExtractor extractor, float partialTick, CallbackInfo ci) {
         UiTransitions.resumeAfterStaticRegion(extractor);
-    }
-
-    // ------------------------------------------------------------------ 音效字幕：默认完全不动
-
-    @Inject(method = BACKGROUND_METHOD, at = @At(value = "INVOKE", target = SUBTITLE_CALL, shift = At.Shift.BEFORE))
-    private void uiTransitions$subtitleBegin(GuiGraphicsExtractor extractor, int mouseX, int mouseY,
-                                             float partialTick, CallbackInfo ci) {
-        UiTransitions.pauseForHud(extractor);
-    }
-
-    @Inject(method = BACKGROUND_METHOD, at = @At(value = "INVOKE", target = SUBTITLE_CALL, shift = At.Shift.AFTER))
-    private void uiTransitions$subtitleEnd(GuiGraphicsExtractor extractor, int mouseX, int mouseY,
-                                           float partialTick, CallbackInfo ci) {
-        UiTransitions.resumeAfterHud(extractor);
     }
 }

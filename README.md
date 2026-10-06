@@ -40,9 +40,9 @@ One jar for both Fabric and NeoForge. Minecraft **26.3**.
 | --- | --- | --- |
 | 变暗遮罩 / 背景模糊 / 菜单底衬 | 留在原地，只淡出 | 跟着滑会露出没被压暗或没被模糊的边缘（暂停菜单尤其明显） |
 | 音效字幕 | 完全不动 | 字幕挂在背景层里绘制，不处理会跟着背包一起动 |
-| 玩家快捷栏（HUD 那一排 + 面板里的那排槽位） | 固定为原版观感 | 这两排在关闭/切换动画期间不应变淡或位移 |
+| 玩家快捷栏（HUD 那一排 + 面板里的那排槽位） | **原地淡变时**固定为原版观感 | 点标签 / 滚动物品列表时这两排不该跟着淡。打开/关闭动画时它仍随面板一起动，否则面板消失后会剩下一排孤零零的物品 |
 | 创造模式分类标签切换 | 物品区**原地淡入淡出** | 原版点标签是原地刷新（`selectTab → refreshCurrentTabContents`），没有界面切换 |
-| 创造模式物品列表滚动 | 不做动画 | 逐格渐变在这套渲染管线里不可靠（已移除） |
+| 创造模式物品列表滚动 | **逐格渐变**：越靠进入边越淡 | 新物品"浮现"进来而不是硬闪。渐变带高度与最低透明度可调 |
 | 「同界面换页」（如创造模式搜索标签 ↔ 生存背包） | 与普通界面一样做动画 | 这类**确实**会重建界面 |
 
 关闭动画还有一个细节：**物品与文字比底板早约 8% 结束淡出**（`staggerClose`），刚好避免"底板还在、格子已经空了"的空洞，又几乎看不出先后。
@@ -81,15 +81,22 @@ animatePanel=true             # 容器底板参与动画
 animateDim=false              # 遮罩是否也位移（默认静止）
 animateSubtitles=false        # 字幕是否参与动画（默认不动）
 staggerClose=true             # 关闭时内容比底板略早淡出
-animateTabSwitch=true         # 分类标签切换时物品区淡入淡出
-animateSameTypeSwitch=true    # 同类界面换页也做动画
+animateTabSwitch=true         # 分类标签切换时物品区原地淡入
+tabSwitchMs=300               # 原地淡变时长：标签切换与滚动共用（50–1000 毫秒）
+scrollFadeBand=200            # 滚动逐格渐变的渐变带高度（16–300 像素）
+scrollFadeMin=0               # 滚动时进入边那一侧的最低透明度（0–100 %，0 = 完全淡出）
+animateSameTypeSwitch=true    # 同类界面换页也做动画（默认做）
+animateAllScreens=false       # 所有界面都加动画（默认只做容器界面）
 hidePlayerModelOnClose=true   # 关闭界面时立即隐藏玩家模型
 previewFadeDelay=35           # 打开时玩家模型延迟多久开始淡入（占动画时长 %）
 overlayModsFadeOnly=true      # 装了 JEI 类模组时改为只淡变不位移
-allowLookDuringClose=false    # 关闭动画期间是否允许转动视角
+allowLookDuringClose=true     # 关闭动画期间是否允许转动视角
 extraScreens=mezz.jei,dev.emi.emi,me.shedaniel.rei
-excludedScreens=              # 排除某些界面
+excludedScreens=              # 排除某些界面（按前缀匹配，可写类名或包名）
 ```
+
+> `extraScreens` / `excludedScreens` 都是**前缀匹配**：写 `com.example` 可以整包放行或整包排除。
+> 两个图形配置页（Cloth Config 与 Sodium）暴露的选项与本表一致；改任何一个入口，改的都是同一个文件。
 
 ## 兼容性
 
@@ -101,20 +108,37 @@ excludedScreens=              # 排除某些界面
 ## 从源码构建
 
 ```bash
-# 需要 JDK 25（26.3 的类文件是 Java 25）与官方 26.3 客户端 jar
-javac --release 21 -proc:none -cp "<客户端jar>;<依赖>" -d build/classes $(find ui-transitions/src -name '*.java')
-python ui-transitions/build_jar.py   # 产出 build/ui-transitions/Bedrock-UI-Animations-<版本>-fabric+neoforge.jar
+# 需要 JDK 25（26.3 的类文件是 Java 25）；编译目标固定为 21，与 mixin 配置的 compatibilityLevel 对齐
+python tools/compile.py            # 编译到 build/ui-transitions/classes
+python ui-transitions/build_jar.py # 自检元数据 + 核对 Mixin 注入目标 + 打包
+# 产出 build/ui-transitions/Bedrock-UI-Animations-<版本>-fabric+neoforge.jar
+
+# 改版本号时三处必须一起改（build_jar.py 会校验）：
+#   ui-transitions/resources/fabric.mod.json
+#   ui-transitions/resources/META-INF/neoforge.mods.toml
+#   ui-transitions/gradle.properties
 ```
 
 仓库结构：
 
 ```
 ui-transitions/      模组本体（src 源码 + resources 元数据/图标）
-  build_jar.py       打包脚本（含元数据自检）
+  build_jar.py       打包脚本（元数据自检 + Mixin 注入目标核对）
+  build_release.py   把合并包拆成 Fabric / NeoForge 两个发布 jar
+  gen_verify.py      生成 verify-uit 的桩类与断言程序
   make_icon.py       图标生成脚本
 visualtest/          开发用测试驱动（自动进世界、开背包、连拍截图）
-verify-uit/          离线断言（状态机 / 注入目标 / 各项开关行为）
+verify-uit/          离线断言（状态机 / 各项开关行为）
+tools/               构建与校验工具
+  compile.py         统一编译入口（依赖路径集中在这里）
+  check_mixins.py    静态核对每个注入目标是否真的存在（defaultRequire=0 的兜底）
+  run_verify.py      编译并运行 verify-uit 的全部断言
 ```
+
+`tools/check_mixins.py` 值得单独说明：Mixin 配置是 `defaultRequire: 0`，
+注入没命中只会**静默失效**（表现为"功能莫名不见了"而不是报错）。
+这个脚本直接解析 class 文件，核对每个 `@Inject` / `@At(target=...)` 的目标方法、
+以及被注入方法体里是否真的有那条调用指令，把这类问题变成构建期错误。
 
 ## 作者与许可
 

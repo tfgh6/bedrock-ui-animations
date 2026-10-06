@@ -250,28 +250,31 @@ NeoForge 侧只做了结构性验证（元数据 + 相同的 Mixin 配置 + 不�
 ## 6. 自行构建 / 复现验证
 
 ```powershell
-# A. 离线：编译 + 打包（需要官方 26.3 client jar、fabric-loader、sponge-mixin、joml、ASM）
-& '<JDK25>\bin\javac.exe' --release 21 -proc:none -encoding UTF-8 -cp "<上述依赖>" `
-    -d build\ui-transitions\classes (Get-ChildItem ui-transitions\src -Recurse -Filter *.java).FullName
-& '<python>' ui-transitions\build_jar.py                      # 含元数据校验
+# A. 离线：编译 + 打包（依赖路径集中在 tools\compile.py，不用手拼 classpath）
+& '<python>' tools\compile.py            # 编译到 build\ui-transitions\classes
+& '<python>' ui-transitions\build_jar.py # 元数据自检 + 核对 Mixin 注入目标 + 打包
+& '<python>' ui-transitions\build_release.py   # 可选：拆成 Fabric / NeoForge 两个发布 jar
 
-# B. 离线：Mixin 注入验收（严格模式 + 出厂配置）
-& '<JDK25>\bin\java.exe' -cp "<mixin-test 类路径>;<client-26.3.jar>;<joml.jar>;<解包目录>" `
-    MixinTest <解包目录> ui-transitions.mixins.json <8 个目标类>
+# B. 离线：Mixin 注入目标核对（defaultRequire=0，没命中只会静默失效）
+& '<python>' tools\check_mixins.py       # 解析 class 文件，核对每个注入点是否真的成立
 
-# C. 离线：状态机验收
-& '<python>' ui-transitions\gen_verify.py
-& '<JDK21>\bin\javac.exe' -d <桩类目录> (Get-ChildItem verify-uit\stubs -Recurse -Filter *.java).FullName
-& '<JDK21>\bin\javac.exe' -cp "build\ui-transitions\classes;<桩类目录>" -d <验证目录> verify-uit\VerifyTransitions.java
-& '<JDK21>\bin\java.exe' -Duitransitions.gamedir=<临时目录> -cp "..." VerifyTransitions
+# C. 离线：状态机断言（桩类的 gameDirectory 落在临时目录，不会写到仓库里）
+& '<python>' tools\run_verify.py         # 编译并运行 verify-uit 下的全部断言
 
 # D. 实机：启动游戏 + 截图时间线（会写入实例目录并弹出游戏窗口）
-& '<python>' visualtest\launch_mc.py --extra-mod build\ui-transitions\UI-Transitions-1.0.0-fabric+neoforge.jar `
+& '<python>' visualtest\launch_mc.py `
+    --extra-mod build\ui-transitions\Bedrock-UI-Animations-1.3.0-fabric+neoforge.jar `
     --extra-mod build\visualtest\UI-Transitions-VisualTest-1.0.0.jar
 ```
 
-`visualtest/launch_mc.py` 直接按 PCL2 的版本 JSON 组命令启动（自动展开占位符、抽取 Windows natives、
-把游戏窗口从最小化恢复），不经过启动器 GUI。
+B 这一步针对的是本项目最容易踩的坑：mixin 配置写的是 `defaultRequire: 0`（为了跨版本优雅降级），
+代价是描述符写错、目标方法改名、调用点被删都**不会有任何报错**，只表现为"某个功能不见了"。
+`tools/check_mixins.py` 自己解析 class 文件常量池与字节码，核对三件事：
+目标类存在、`method = ...` 所指方法存在、以及被注入的方法体里确实有 `@At(target = ...)` 那条调用指令。
+`build_jar.py` 每次打包也会自动跑一遍这个检查。
+
+`visualtest/launch_mc.py` 直接按 PCL2 的版本 JSON 组命令启动（自动展开占位符、按架构抽取 Windows natives、
+把游戏窗口从最小化恢复），不经过启动器 GUI。`--print` 是纯粹的预演，不会写任何文件。
 
 ---
 
@@ -290,8 +293,9 @@ NeoForge 侧只做了结构性验证（元数据 + 相同的 Mixin 配置 + 不�
      这两处在你的手机上打开背包时应能直接验证；若字幕仍跟着动，请把界面名与配置发我。
 4. **JEI / REI / EMI 只做了逻辑验证**：按类名/包名前缀匹配（默认 `mezz.jei,dev.emi.emi,me.shedaniel.rei`），
    本机没有安装这些模组，无法实测它们的界面。若某个界面没跟上或不该动，用 `extraScreens` / `excludedScreens` 增删即可，把类名发我我也可以内置默认值。
-5. **NeoForge 侧的图形化配置界面未实现**：Cloth Config 在 NeoForge 上的注册需要 NeoForge 自己的 API
-   （本机没有 26.3 的 NeoForge 环境可编译验证），因此 NeoForge 用户目前用配置文件。
+5. **两个图形配置入口**：Fabric 侧用 Mod Menu + Cloth Config；Sodium 侧用其官方配置 API 注册整页。
+   NeoForge 侧由 `UiTransitionsNeoForge` 通过 `IConfigScreenFactory` 注册同一个界面，
+   但**未在真实 NeoForge 环境里启动验证过**（本机没有 26.3 的 NeoForge 实例）。
    Mixin 与动画本身与加载器无关，两个加载器共用同一份实现。
 6. **关闭动画依赖"拦下切屏再补做"**：若玩家在动画进行中退出世界/切服务器，最坏情况是个别界面状态残留；
    动画仅 300ms，实际几乎遇不到。

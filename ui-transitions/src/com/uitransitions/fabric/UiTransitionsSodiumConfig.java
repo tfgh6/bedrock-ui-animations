@@ -20,6 +20,10 @@ import net.minecraft.resources.Identifier;
  *
  * 入口由 Sodium 通过 {@code sodium:config_api_user} 主动查询，
  * 因此没装 Sodium 时这个类根本不会被加载，也就不会有任何兼容性风险。
+ *
+ * 本页的选项必须与 Cloth Config 那一页（UiTransitionsConfigScreen）**保持一致**：
+ * 同一个开关在两处显示不同的默认值或说明，比少一个开关更糟。
+ * 两边都只暴露"真的会生效"的选项。
  */
 @ConfigEntryPointForge("ui_transitions")
 public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
@@ -68,7 +72,7 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         OptionGroupBuilder anim = builder.createOptionGroup().setName(tr("动画"));
         anim.addOption(bool(builder, "enabled", "启用动画",
                 "总开关。关闭后完全等同原版界面", true,
-                TransitionConfig.enabled(), TransitionConfig::setEnabled));
+                TransitionConfig::setEnabled));
 
         // 曲线用整数选项（0..7 对应 curve 列表）：Sodium 的枚举选项要求枚举实现它的 TextProvider，
         // 这里不引入额外耦合，改用整数 + 数值格式化，显示效果同样是"当前曲线名"。
@@ -84,17 +88,16 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
 
         anim.addOption(intOption(builder, "duration_ms", "动画时长", "滑入滑出持续的时间，默认 300 毫秒",
                 TransitionConfig.DEFAULT_DURATION_MS, 50, 2000, 10,
-                TransitionConfig.durationMs(), TransitionConfig::setDurationMs,
+                TransitionConfig::setDurationMs,
                 value -> tr(value + " 毫秒")));
 
         anim.addOption(intOption(builder, "offset", "位移距离", "界面滑动多少像素，默认 120；0 = 只淡入淡出",
                 Math.round(TransitionConfig.DEFAULT_OFFSET), 0, 400, 1,
-                Math.round(TransitionConfig.offset()),
                 value -> TransitionConfig.setOffset(value),
                 value -> tr(value + " 像素")));
 
         anim.addOption(intOption(builder, "jelly", "果冻回弹强度", "打开时冲过静止位置再回落的弹性手感，0 = 关闭（默认）",
-                0, 0, 100, 5, Math.round(TransitionConfig.jelly() * 100.0F),
+                0, 0, 100, 5,
                 value -> TransitionConfig.setJelly(value / 100.0F),
                 value -> tr(value + "%")));
 
@@ -102,64 +105,63 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         OptionGroupBuilder layers = builder.createOptionGroup().setName(tr("参与动画的部分"));
         layers.addOption(bool(builder, "animate_panel", "容器底板跟随动画",
                 "背包/箱子的整块底板与槽位背景是否一起滑动淡变", true,
-                TransitionConfig.animatePanel(), TransitionConfig::setAnimatePanel));
+                TransitionConfig::setAnimatePanel));
         layers.addOption(bool(builder, "animate_dim", "变暗遮罩跟随位移",
                 "那层变暗遮罩是否也跟着上下滑。默认关闭（静止）", false,
-                TransitionConfig.animateDim(), TransitionConfig::setAnimateDim));
+                TransitionConfig::setAnimateDim));
         layers.addOption(bool(builder, "animate_subtitles", "音效字幕跟随动画",
                 "字幕在背景层里顺带绘制，默认不参与动画（否则打开背包时字幕会跟着动）", false,
-                TransitionConfig.animateSubtitles(), TransitionConfig::setAnimateSubtitles));
+                TransitionConfig::setAnimateSubtitles));
         layers.addOption(bool(builder, "stagger_close", "关闭时内容提前淡出",
                 "关闭动画里物品与文字比底板略早结束淡出，避免出现空格子", true,
-                TransitionConfig.staggerClose(), TransitionConfig::setStaggerClose));
+                TransitionConfig::setStaggerClose));
         layers.addOption(intOption(builder, "preview_fade_delay", "玩家模型延迟淡入",
                 "打开界面时玩家模型等待多久才开始淡入（占动画时长百分比）", 35, 0, 100, 5,
-                TransitionConfig.previewFadeDelay(), TransitionConfig::setPreviewFadeDelay,
+                TransitionConfig::setPreviewFadeDelay,
                 value -> tr(value + "%")));
         layers.addOption(bool(builder, "animate_tab_switch", "分类标签切换动画",
-                "点创造模式物品栏的分类标签时，物品区从点击方向滑入（底板与快捷栏不动）", true,
-                TransitionConfig.animateTabSwitch(), TransitionConfig::setAnimateTabSwitch));
+                "点创造模式物品栏的分类标签时，物品区原地淡入（底板、标签栏、快捷栏都不动）", true,
+                TransitionConfig::setAnimateTabSwitch));
         layers.addOption(intOption(builder, "tab_switch_ms", "标签切换时长", "换页动画毫秒数，默认 300",
-                300, 50, 1000, 10, TransitionConfig.tabSwitchMs(),
-                TransitionConfig::setTabSwitchMs, value -> tr(value + " 毫秒")));
+                300, 50, 1000, 10,
+                TransitionConfig::setTabSwitchMs,
+                value -> tr(value + " 毫秒")));
         layers.addOption(intOption(builder, "scroll_fade_band", "滚动渐变带高度",
-                "滚动时多高范围内的格子参与渐变，越大越明显", 200, 16, 300, 2,
-                TransitionConfig.scrollFadeBand(), TransitionConfig::setScrollFadeBand,
+                "滚动物品列表时，多高范围内的格子参与逐格渐变；越大越明显", 200, 16, 300, 2,
+                TransitionConfig::setScrollFadeBand,
                 value -> tr(value + " 像素")));
         layers.addOption(intOption(builder, "scroll_fade_min", "滚动渐变最低透明度",
-                "边缘格子最淡到什么程度（%），越小越明显", 0, 0, 100, 5,
-                TransitionConfig.scrollFadeMin(), TransitionConfig::setScrollFadeMin,
+                "滚动时刚进入视野那一侧最淡到什么程度（%）；0 = 完全淡出", 0, 0, 100, 5,
+                TransitionConfig::setScrollFadeMin,
                 value -> tr(value + "%")));
         layers.addOption(bool(builder, "hide_player_model_on_close", "关闭时隐藏玩家模型",
                 "关闭界面时玩家小模型直接不画", true,
-                TransitionConfig.hidePlayerModelOnClose(), TransitionConfig::setHidePlayerModelOnClose));
-        layers.addOption(bool(builder, "tab_follow_click", "滑入方向跟随点击",
-                "关掉则固定从右侧滑入", true,
-                TransitionConfig.tabFollowClick(), TransitionConfig::setTabFollowClick));
+                TransitionConfig::setHidePlayerModelOnClose));
+        // 默认值与 TransitionConfig.animateSameTypeSwitch 一致：默认是**做**动画的
         layers.addOption(bool(builder, "animate_same_type_switch", "同类界面切换也做动画",
-                "创造模式分类标签、配方书翻页这类同界面换页默认直接切换", false,
-                TransitionConfig.animateSameTypeSwitch(), TransitionConfig::setAnimateSameTypeSwitch));
+                "创造模式分类标签、配方书翻页这类同界面换页是否也做过渡动画（默认做）", true,
+                TransitionConfig::setAnimateSameTypeSwitch));
         layers.addOption(bool(builder, "overlay_mods_fade_only", "装了 JEI 类模组时只淡变不位移",
                 "JEI/EMI/REI 的固定按钮和底板在同一条渲染层里，只能靠整个界面不滑来让它们留在原地", true,
-                TransitionConfig.overlayModsFadeOnly(), TransitionConfig::setOverlayModsFadeOnly));
+                TransitionConfig::setOverlayModsFadeOnly));
         layers.addOption(bool(builder, "animate_all_screens", "所有界面都加动画",
                 "默认只对容器界面与额外列出的界面生效", false,
-                TransitionConfig.animateAllScreens(), TransitionConfig::setAnimateAllScreens));
+                TransitionConfig::setAnimateAllScreens));
 
         // ---------------------------------------------------------- 淡入淡出细节
         OptionGroupBuilder fadeGroup = builder.createOptionGroup().setName(tr("淡入淡出细节"));
         fadeGroup.addOption(bool(builder, "fade", "逐元素淡入淡出",
                 "总开关。关闭后只滑动、不改变透明度", true,
-                TransitionConfig.fade(), TransitionConfig::setFade));
+                TransitionConfig::setFade));
         fadeGroup.addOption(bool(builder, "fade_dim", "遮罩随动画一起淡出",
                 "界面淡出时那层变暗遮罩也一起变淡，世界随之变亮，动画中途不会偏黑", true,
-                TransitionConfig.fadeDim(), TransitionConfig::setFadeDim));
+                TransitionConfig::setFadeDim));
         fadeGroup.addOption(bool(builder, "fade_items", "物品图标淡入淡出",
                 "关掉则物品直接出现，但仍随底板滑动", true,
-                TransitionConfig.fadeItems(), TransitionConfig::setFadeItems));
+                TransitionConfig::setFadeItems));
         fadeGroup.addOption(bool(builder, "fade_text", "文字淡入淡出",
                 "标题、数量等文字是否一起淡变", true,
-                TransitionConfig.fadeText(), TransitionConfig::setFadeText));
+                TransitionConfig::setFadeText));
 
         // ---------------------------------------------------------- 组装页面
         OptionPageBuilder page = builder.createOptionPage().setName(tr("界面过渡动画"));
@@ -173,6 +175,9 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
      * 必须**实时**读取配置：若在注册时捕获当时的取值，
      * Sodium 会永远显示旧值（表现为"调完再打开又是 0"），
      * 而且它保存时会把旧值写回文件，覆盖掉另一个配置界面（Cloth Config）里的修改。
+     *
+     * 因此这里不再额外接收一个"当前值"参数 —— 传进来也只会被忽略，容易让人误以为它生效。
+     * 未列出的 key 会走 default 分支：真漏了会立刻看出来（而不是静默读到 0/false）。
      */
     private static boolean boolGetter(String key) {
         return switch (key) {
@@ -190,7 +195,7 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "fade_dim" -> TransitionConfig.fadeDim();
             case "fade_items" -> TransitionConfig.fadeItems();
             case "fade_text" -> TransitionConfig.fadeText();
-            default -> true;
+            default -> throw new IllegalArgumentException("未登记的布尔选项: " + key);
         };
     }
 
@@ -204,12 +209,12 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
             case "scroll_fade_band" -> TransitionConfig.scrollFadeBand();
             case "scroll_fade_min" -> TransitionConfig.scrollFadeMin();
             case "preview_fade_delay" -> TransitionConfig.previewFadeDelay();
-            default -> 0;
+            default -> throw new IllegalArgumentException("未登记的整数选项: " + key);
         };
     }
 
     private static BooleanOptionBuilder bool(ConfigBuilder builder, String key, String name, String tooltip,
-                                             boolean defaultValue, boolean current,
+                                             boolean defaultValue,
                                              java.util.function.Consumer<Boolean> setter) {
         return builder.createBooleanOption(id(key))
                 .setName(tr(name))
@@ -221,7 +226,6 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
 
     private static IntegerOptionBuilder intOption(ConfigBuilder builder, String key, String name, String tooltip,
                                                   int defaultValue, int min, int max, int step,
-                                                  int current,
                                                   java.util.function.Consumer<Integer> setter,
                                                   java.util.function.IntFunction<Component> formatter) {
         return builder.createIntegerOption(id(key))
