@@ -62,6 +62,15 @@ public final class UiTransitions {
      * 帧级复位发生在下一帧的 beginContentLayer，所以这个值在整帧内都有效。
      */
     private static volatile float PIP_FRAME_ALPHA = 1.0F;
+    /**
+     * 画中画内容这一帧该跟着界面位移多少。
+     *
+     * 画中画是在渲染阶段单独贴回界面的，它自己的 pose 恒为单位矩阵，
+     * 所以界面滑动时它只会淡、不会动 —— 看起来就像"面板走了，布娃娃/附魔书
+     * 还孤零零留在原地"。这里把内容层的位移记下来，
+     * 由 PictureInPictureRendererMixin 叠到它那张贴图的 pose 上。
+     */
+    private static final ThreadLocal<Float> PIP_SHIFT = ThreadLocal.withInitial(() -> 0.0F);
     private static final ThreadLocal<Boolean> TAB_STATIC = ThreadLocal.withInitial(() -> false);
     /**
      * 物品/画中画走的是预乘 alpha 管线（GUI_TEXTURED_PREMULTIPLIED_ALPHA）：
@@ -275,6 +284,9 @@ public final class UiTransitions {
     public static void beginContentLayer(Screen screen, GuiGraphicsExtractor extractor) {
         FRAME_FADE_ALPHA = 1.0F;      // 新的一帧开始
         PIP_FRAME_ALPHA = 1.0F;
+        // 这一帧若不做动画，位移必须归零：LAYER_SHIFT 在上一次动画收尾时才会回到 0，
+        // 中途切到不做动画的界面会残留上一次的值，画中画就会被莫名其妙地推开。
+        LAYER_SHIFT.set(0.0F);
         // 只针对背包/容器界面里的玩家模型；书、地图等其它画中画预览照旧渐隐
         boolean container = screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
         HIDE_PREVIEW = isClosing(screen) && container;
@@ -802,8 +814,11 @@ public final class UiTransitions {
     public static void beginPipBlit(Object state) {
         try {
             if (!TransitionConfig.fade()) {
+                PIP_SHIFT.set(0.0F);
                 return;
             }
+            // 让画中画跟着界面一起位移（内容层滑多少，它就滑多少）
+            PIP_SHIFT.set(LAYER_SHIFT.get());
             // playerModelFollowsAnimation=true 时，玩家模型不搞特殊：
             // 既不在打开时延迟淡入，也不在关闭时提前隐藏，而是和界面一起淡
             boolean specialPlayerModel = isPlayerPreview(state)
@@ -822,7 +837,26 @@ public final class UiTransitions {
             WINDOW_ALPHA.set(PIP_FRAME_ALPHA);
             PIP_BLITTING.set(true);
         } catch (Throwable t) {
+            PIP_SHIFT.set(0.0F);
             report("beginPipBlit", t);
+        }
+    }
+
+    /**
+     * 把当前动画位移叠加到画中画的位姿上，交给 PictureInPictureRendererMixin 使用。
+     *
+     * 叠加而不是替换：贴图自己的 pose 以后若不再恒为单位矩阵，这里也不会丢信息。
+     */
+    public static org.joml.Matrix3x2fc shiftPipPose(org.joml.Matrix3x2fc pose) {
+        try {
+            float shift = PIP_SHIFT.get();
+            if (shift == 0.0F || pose == null) {
+                return pose;
+            }
+            return new org.joml.Matrix3x2f(pose).translate(0.0F, shift);
+        } catch (Throwable t) {
+            report("shiftPipPose", t);
+            return pose;
         }
     }
 
@@ -845,8 +879,10 @@ public final class UiTransitions {
                 PIP_BLITTING.set(false);
                 WINDOW_ALPHA.set(1.0F);
             }
+            PIP_SHIFT.set(0.0F);
         } catch (Throwable t) {
             PIP_BLITTING.set(false);
+            PIP_SHIFT.set(0.0F);
             report("endPipBlit", t);
         }
     }

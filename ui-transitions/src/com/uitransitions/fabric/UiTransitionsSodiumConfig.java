@@ -45,8 +45,9 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
 
     private static int curveIndex(TransitionConfig.Curve curve) {
         String[] ids = TransitionConfig.Curve.ids();
+        String wanted = curve == null ? "cubic" : curve.id();
         for (int i = 0; i < ids.length; i++) {
-            if (ids[i].equals(curve.id())) {
+            if (ids[i].equals(wanted)) {
                 return i;
             }
         }
@@ -74,13 +75,16 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
                 "总开关。关闭后完全等同原版界面", true,
                 TransitionConfig::setEnabled));
 
-        // 曲线用整数选项（0..7 对应 curve 列表）：Sodium 的枚举选项要求枚举实现它的 TextProvider，
+        // 曲线用整数选项（下标对应 Curve.ids()）：Sodium 的枚举选项要求枚举实现它的 TextProvider，
         // 这里不引入额外耦合，改用整数 + 数值格式化，显示效果同样是"当前曲线名"。
+        // 范围跟着 Curve.ids() 走，加了 custom 之后不会再出现"下标越界"。
+        String[] curveIds = TransitionConfig.Curve.ids();
         anim.addOption(builder.createIntegerOption(id("curve"))
                 .setName(tr("缓动曲线"))
-                .setTooltip(tr("0 linear / 1 sine / 2 cubic（默认）/ 3 quart / 4 quint / 5 expo / 6 circ / 7 back"))
+                .setTooltip(tr("0 linear / 1 sine / 2 cubic（默认）/ 3 quart / 4 quint / 5 expo / "
+                        + "6 circ / 7 back / 8 custom（自定义，去 Cloth 配置界面的曲线编辑器里调）"))
                 .setDefaultValue(2)
-                .setRange(0, 7, 1)
+                .setRange(0, curveIds.length - 1, 1)
                 .setValueFormatter(value -> tr(curveName(value)))
                 .setBinding(value -> TransitionConfig.setCurveId(curveName(value)),
                         () -> curveIndex(TransitionConfig.curve()))

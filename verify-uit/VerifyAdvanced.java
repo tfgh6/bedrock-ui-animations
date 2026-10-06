@@ -463,6 +463,61 @@ public class VerifyAdvanced {
 
         UiTransitions.setOverlayModPresentForTest(null);
 
+        // ---------- 12) 画中画跟随位移 + 渐入/渐出各有一份自定义曲线 ----------
+        TransitionConfig.setPlayerModelFollowsAnimation(true);
+        TransitionConfig.setDurationMsBoth(2000);
+        TransitionConfig.setOffset(120.0F);
+        gui.setScreen(new Screen());
+        Screen pipShiftHost = new EmptyContainer();
+        openPanel(gui, pipShiftHost);
+        UiTransitions.beginContentLayer(pipShiftHost, extractor);
+        UiTransitions.endContentLayer(pipShiftHost, extractor);
+        Thread.sleep(300);                                  // 打开动画刚起步，位移接近满值
+        UiTransitions.beginContentLayer(pipShiftHost, extractor);
+        Object entityState = new FakeGuiEntityState();
+        UiTransitions.beginPipBlit(entityState);
+        // 传一个真实的单位矩阵进去：位姿是"叠加"的，传 null 会原样返回 null，测不出东西
+        float shifted = pipShiftY(UiTransitions.shiftPipPose(new org.joml.Matrix3x2f()));
+        UiTransitions.endPipBlit();
+        UiTransitions.endContentLayer(pipShiftHost, extractor);
+        check("画中画会跟着界面一起位移（不再原地不动）", shifted > 20.0F, "位移=" + shifted);
+
+        // 离开画中画之后应当回到原位
+        UiTransitions.beginContentLayer(pipShiftHost, extractor);
+        UiTransitions.beginPipBlit(entityState);
+        UiTransitions.endPipBlit();
+        float afterEnd = pipShiftY(UiTransitions.shiftPipPose(new org.joml.Matrix3x2f()));
+        UiTransitions.endContentLayer(pipShiftHost, extractor);
+        check("离开画中画后位移归零", Math.abs(afterEnd) < 0.001F, "位移=" + afterEnd);
+
+        // 渐入 / 渐出各存一份自定义控制点，互不影响
+        TransitionConfig.setOpenCurveCustom("0,0,1,1");            // 匀速
+        TransitionConfig.setCloseCurveCustom("0.34,1.56,0.64,1");  // 带回弹
+        float openVal = TransitionConfig.openCurve().easeOut(0.5F);
+        float closeVal = TransitionConfig.closeCurve().easeOut(0.5F);
+        check("渐入与渐出的自定义控制点互不影响",
+                Math.abs(openVal - closeVal) > 0.05F,
+                "渐入=" + openVal + " 渐出=" + closeVal);
+        check("设置自定义参数后该方向自动切到 custom",
+                "custom".equals(TransitionConfig.openCurve().id())
+                        && "custom".equals(TransitionConfig.closeCurve().id()),
+                "渐入=" + TransitionConfig.openCurve().id() + " 渐出=" + TransitionConfig.closeCurve().id());
+
+        // 曲线编辑器画图与实机求值必须是同一段代码
+        float[] editorPoints = { 0.25F, 0.1F, 0.25F, 1.0F };
+        check("贝塞尔求值就是曲线编辑器画图用的那一份",
+                Math.abs(TransitionConfig.Curve.bezierEase(editorPoints, 0.5F)
+                        - TransitionConfig.Curve.custom(editorPoints).easeIn(0.5F)) < 1.0e-5F,
+                "两者一致");
+
+        // 通用曲线切成 custom 时，不能把已经调好的两个方向的控制点丢掉
+        TransitionConfig.setCurveId("custom");
+        check("切到 custom 会沿用各方向已保存的控制点",
+                Math.abs(TransitionConfig.openCurve().easeOut(0.5F) - openVal) < 1.0e-5F
+                        && Math.abs(TransitionConfig.closeCurve().easeOut(0.5F) - closeVal) < 1.0e-5F,
+                "渐入=" + TransitionConfig.openCurve().easeOut(0.5F)
+                        + " 渐出=" + TransitionConfig.closeCurve().easeOut(0.5F));
+
         TransitionConfig.resetToDefaults();
         System.out.println();
         if (failures == 0) {
@@ -537,6 +592,21 @@ public class VerifyAdvanced {
     private static float customEaseOut(float t) {
         TransitionConfig.setCurveId("custom");
         return TransitionConfig.curve().easeOut(t);
+    }
+
+    /**
+     * 从位姿矩阵里取出 y 方向位移。
+     * pose 为 null 时 shiftPipPose 会原样返回 null —— 那说明"没有位移"，
+     * 但为了区分"没位移"和"没生效"，这里把 null 视作 0，另用位移值本身判断。
+     */
+    private static float pipShiftY(org.joml.Matrix3x2fc pose) {
+        if (pose == null) {
+            return 0.0F;
+        }
+        if (pose instanceof org.joml.Matrix3x2f) {
+            return ((org.joml.Matrix3x2f) pose).m21();
+        }
+        return 0.0F;
     }
 
     /** 类名里含 "Entity"，用来命中 isPlayerPreview 的判定 */

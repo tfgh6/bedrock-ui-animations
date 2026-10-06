@@ -85,7 +85,10 @@ public final class TransitionConfig {
     private static volatile String closeCurveId = "cubic";
     private static volatile Curve openCurveCache = Curve.CUBIC;
     private static volatile Curve closeCurveCache = Curve.CUBIC;
-    /** 自定义曲线的控制点（原始字符串 + 解析结果） */
+    /** 自定义曲线的控制点（原始字符串 + 解析结果），渐入渐出各一份 */
+    private static volatile String openCurveCustom = DEFAULT_CUSTOM_BEZIER;
+    private static volatile String closeCurveCustom = DEFAULT_CUSTOM_BEZIER;
+    /** 兼容旧配置：老版本只有一个 curveCustom */
     private static volatile String curveCustom = DEFAULT_CUSTOM_BEZIER;
     private static volatile float[] customBezierCache = parseBezier(DEFAULT_CUSTOM_BEZIER);
     /** 玩家模型（布娃娃）是否完全跟随界面动画 */
@@ -103,82 +106,87 @@ public final class TransitionConfig {
 
     // ================================================================== 缓动曲线
 
-    /** 可选缓动曲线：曲线越"陡"，动画起步/收尾越快 */
-    public enum Curve {
-        LINEAR("linear"),
-        SINE("sine"),
-        CUBIC("cubic"),
-        QUART("quart"),
-        QUINT("quint"),
-        EXPO("expo"),
-        CIRC("circ"),
-        BACK("back"),
-        /** 自定义：用 curveCustom 里的三次贝塞尔控制点 */
-        CUSTOM("custom");
+    /**
+     * 缓动曲线。内置若干条，也可以用四个贝塞尔控制点自定义。
+     *
+     * 这里刻意**不是枚举**：自定义曲线要携带自己的控制点，而渐入、渐出各自可以
+     * 有不同的自定义形状 —— 枚举常量是所有调用点共享的单个实例，装不下这份差异。
+     * 命名曲线仍然是单例常量（Curve.CUBIC 等），用法与枚举时期一致。
+     */
+    public static final class Curve {
+
+        public static final String CUSTOM_ID = "custom";
+
+        private static final int KIND_CUSTOM = 100;
+
+        public static final Curve LINEAR = new Curve("linear", 0);
+        public static final Curve SINE = new Curve("sine", 1);
+        public static final Curve CUBIC = new Curve("cubic", 2);
+        public static final Curve QUART = new Curve("quart", 3);
+        public static final Curve QUINT = new Curve("quint", 4);
+        public static final Curve EXPO = new Curve("expo", 5);
+        public static final Curve CIRC = new Curve("circ", 6);
+        public static final Curve BACK = new Curve("back", 7);
+
+        /** 不含 custom：给"曲线名"下拉/校验用，custom 由 TransitionConfig 按方向解析 */
+        private static final Curve[] BUILT_IN = { LINEAR, SINE, CUBIC, QUART, QUINT, EXPO, CIRC, BACK };
 
         private final String id;
+        private final int kind;
+        /** 仅自定义曲线非空：x1,y1,x2,y2 */
+        private final float[] bezier;
 
-        Curve(String id) {
+        private Curve(String id, int kind) {
+            this(id, kind, null);
+        }
+
+        private Curve(String id, int kind, float[] bezier) {
             this.id = id;
+            this.kind = kind;
+            this.bezier = bezier;
+        }
+
+        /** 造一条带控制点的自定义曲线 */
+        public static Curve custom(float[] bezier) {
+            return new Curve(CUSTOM_ID, KIND_CUSTOM, bezier);
         }
 
         public String id() {
             return this.id;
         }
 
+        public boolean isCustom() {
+            return this.kind == KIND_CUSTOM;
+        }
+
+        /** 自定义曲线的控制点；命名曲线返回 null */
+        public float[] bezier() {
+            return this.bezier;
+        }
+
         /** 基础缓入曲线（0..1 → 0..1） */
         private float base(float t) {
             float x = Math.max(0.0F, Math.min(1.0F, t));
-            return switch (this) {
-                case LINEAR -> x;
-                case SINE -> 1.0F - (float) Math.cos(x * Math.PI / 2.0);
-                case CUBIC -> x * x * x;
-                case QUART -> x * x * x * x;
-                case QUINT -> x * x * x * x * x;
-                case EXPO -> x <= 0.0F ? 0.0F : (float) Math.pow(2.0, 10.0 * x - 10.0);
-                case CIRC -> 1.0F - (float) Math.sqrt(Math.max(0.0, 1.0 - (double) x * x));
-                case BACK -> 2.70158F * x * x * x - 1.70158F * x * x;
-                case CUSTOM -> customBezier(x);
-            };
-        }
-
-        /**
-         * 三次贝塞尔缓动，控制点由配置里的 curveCustom 给出（P0=(0,0)、P3=(1,1) 固定）。
-         *
-         * 和 CSS 的 cubic-bezier() 是同一套：先按 x 反解参数 t，再取该 t 处的 y。
-         * 这里用二分而不是牛顿迭代 —— 只求 30 次、不依赖导数，碰到退化控制点也不会炸。
-         */
-        private static float customBezier(float x) {
-            float[] points = TransitionConfig.customBezier();
-            float x1 = points[0];
-            float y1 = points[1];
-            float x2 = points[2];
-            float y2 = points[3];
-            if (x <= 0.0F) {
-                return 0.0F;
+            switch (this.kind) {
+                case 0:
+                    return x;
+                case 1:
+                    return 1.0F - (float) Math.cos(x * Math.PI / 2.0);
+                case 2:
+                    return x * x * x;
+                case 3:
+                    return x * x * x * x;
+                case 4:
+                    return x * x * x * x * x;
+                case 5:
+                    return x <= 0.0F ? 0.0F : (float) Math.pow(2.0, 10.0 * x - 10.0);
+                case 6:
+                    return 1.0F - (float) Math.sqrt(Math.max(0.0, 1.0 - (double) x * x));
+                case 7:
+                    return 2.70158F * x * x * x - 1.70158F * x * x;
+                default:
+                    return bezierEase(this.bezier, x);
             }
-            if (x >= 1.0F) {
-                return 1.0F;
-            }
-            float lo = 0.0F;
-            float hi = 1.0F;
-            float t = x;
-            for (int i = 0; i < 30; i++) {
-                t = (lo + hi) * 0.5F;
-                float current = bezierAxis(t, x1, x2);
-                if (current < x) {
-                    lo = t;
-                } else {
-                    hi = t;
-                }
-            }
-            return Math.max(0.0F, Math.min(1.0F, bezierAxis(t, y1, y2)));
-        }
-
-        /** 三次贝塞尔在参数 t 处的某一维取值（端点固定为 0 与 1） */
-        private static float bezierAxis(float t, float p1, float p2) {
-            float u = 1.0F - t;
-            return 3.0F * u * u * t * p1 + 3.0F * u * t * t * p2 + t * t * t;
         }
 
         /** 关闭用：缓入 */
@@ -191,10 +199,58 @@ public final class TransitionConfig {
             return Math.max(0.0F, Math.min(1.0F, 1.0F - base(1.0F - t)));
         }
 
+        /**
+         * 三次贝塞尔缓动（P0=(0,0)、P3=(1,1) 固定），与 CSS 的 cubic-bezier() 同一套：
+         * 先按 x 反解参数 t，再取该 t 处的 y。
+         *
+         * 用二分而不是牛顿迭代 —— 只求 30 次、不依赖导数，碰到退化控制点也不会炸。
+         * 公开出来是为了让曲线编辑界面能直接用它取样画图，保证"看到的"和"跑出来的"一致。
+         */
+        public static float bezierEase(float[] points, float x) {
+            float x1 = 0.25F;
+            float y1 = 0.1F;
+            float x2 = 0.25F;
+            float y2 = 1.0F;
+            if (points != null && points.length == 4) {
+                x1 = points[0];
+                y1 = points[1];
+                x2 = points[2];
+                y2 = points[3];
+            }
+            if (x <= 0.0F) {
+                return 0.0F;
+            }
+            if (x >= 1.0F) {
+                return 1.0F;
+            }
+            float lo = 0.0F;
+            float hi = 1.0F;
+            float t = x;
+            for (int i = 0; i < 30; i++) {
+                t = (lo + hi) * 0.5F;
+                if (bezierAxis(t, x1, x2) < x) {
+                    lo = t;
+                } else {
+                    hi = t;
+                }
+            }
+            return bezierAxis(t, y1, y2);
+        }
+
+        /** 三次贝塞尔在参数 t 处的某一维取值（端点固定为 0 与 1） */
+        public static float bezierAxis(float t, float p1, float p2) {
+            float u = 1.0F - t;
+            return 3.0F * u * u * t * p1 + 3.0F * u * t * t * p2 + t * t * t;
+        }
+
+        /** 按 id 取命名曲线；"custom" 返回一条控制点为默认值的自定义曲线 */
         public static Curve byId(String value) {
             if (value != null) {
                 String trimmed = value.trim().toLowerCase(Locale.ROOT);
-                for (Curve curve : values()) {
+                if (CUSTOM_ID.equals(trimmed)) {
+                    return custom(TransitionConfig.parseBezier(DEFAULT_CUSTOM_BEZIER));
+                }
+                for (Curve curve : BUILT_IN) {
                     if (curve.id.equals(trimmed)) {
                         return curve;
                     }
@@ -203,13 +259,19 @@ public final class TransitionConfig {
             return CUBIC;
         }
 
+        /** 全部可选 id（含 custom），供配置界面列出 */
         public static String[] ids() {
-            Curve[] values = values();
-            String[] ids = new String[values.length];
-            for (int i = 0; i < values.length; i++) {
-                ids[i] = values[i].id;
+            String[] ids = new String[BUILT_IN.length + 1];
+            for (int i = 0; i < BUILT_IN.length; i++) {
+                ids[i] = BUILT_IN[i].id;
             }
+            ids[BUILT_IN.length] = CUSTOM_ID;
             return ids;
+        }
+
+        /** 命名曲线（不含 custom） */
+        public static Curve[] builtIn() {
+            return BUILT_IN.clone();
         }
     }
 
@@ -292,7 +354,12 @@ public final class TransitionConfig {
         setOpenCurveInternal(properties.getProperty("openCurve", legacyCurve));
         setCloseCurveInternal(properties.getProperty("closeCurve", legacyCurve));
         setCurveIdInternal(legacyCurve);
-        setCurveCustomInternal(properties.getProperty("curveCustom", curveCustom));
+        // 老配置只有一个 curveCustom，迁移时同时套给渐入与渐出
+        String legacyCustom = properties.getProperty("curveCustom", DEFAULT_CUSTOM_BEZIER);
+        curveCustom = isValidBezier(legacyCustom) ? legacyCustom : DEFAULT_CUSTOM_BEZIER;
+        customBezierCache = parseBezier(curveCustom);
+        setOpenCurveCustomInternal(properties.getProperty("openCurveCustom", legacyCustom));
+        setCloseCurveCustomInternal(properties.getProperty("closeCurveCustom", legacyCustom));
         playerModelFollowsAnimation = readBoolean(properties, "playerModelFollowsAnimation",
                 playerModelFollowsAnimation);
         rebuildSets();
@@ -323,6 +390,8 @@ public final class TransitionConfig {
         properties.setProperty("openCurve", openCurveId);
         properties.setProperty("closeCurve", closeCurveId);
         properties.setProperty("curveCustom", curveCustom);
+        properties.setProperty("openCurveCustom", openCurveCustom);
+        properties.setProperty("closeCurveCustom", closeCurveCustom);
         properties.setProperty("playerModelFollowsAnimation", Boolean.toString(playerModelFollowsAnimation));
         properties.setProperty("fade", Boolean.toString(fade));
         properties.setProperty("fadeDim", Boolean.toString(fadeDim));
@@ -409,6 +478,8 @@ public final class TransitionConfig {
         closeCurveCache = Curve.CUBIC;
         curveCustom = DEFAULT_CUSTOM_BEZIER;
         customBezierCache = parseBezier(DEFAULT_CUSTOM_BEZIER);
+        openCurveCustom = DEFAULT_CUSTOM_BEZIER;
+        closeCurveCustom = DEFAULT_CUSTOM_BEZIER;
         playerModelFollowsAnimation = true;
         rebuildSets();
         save();
@@ -566,6 +637,22 @@ public final class TransitionConfig {
     /** 渐出（关闭）用的曲线 */
     public static Curve closeCurve() {
         return closeCurveCache;
+    }
+
+    public static String openCurveCustom() {
+        return openCurveCustom;
+    }
+
+    public static String closeCurveCustom() {
+        return closeCurveCustom;
+    }
+
+    /** 把曲线 id 解析成实例：custom 会带上该方向自己的控制点 */
+    private static Curve resolveCurve(String id, String customPoints) {
+        if (Curve.CUSTOM_ID.equals(id)) {
+            return Curve.custom(parseBezier(customPoints));
+        }
+        return Curve.byId(id);
     }
 
     /** 自定义曲线的控制点 x1,y1,x2,y2（已经校验并夹紧） */
@@ -728,13 +815,15 @@ public final class TransitionConfig {
     }
 
     public static synchronized void setCurve(Curve value) {
-        Curve resolved = value == null ? Curve.CUBIC : value;
-        curveId = resolved.id();
-        curveCache = resolved;
-        openCurveId = resolved.id();
-        openCurveCache = resolved;
-        closeCurveId = resolved.id();
-        closeCurveCache = resolved;
+        String id = (value == null ? Curve.CUBIC : value).id();
+        curveId = id;
+        openCurveId = id;
+        closeCurveId = id;
+        // 注意：不能直接用传进来的那个实例。custom 必须按各自方向已保存的控制点重新解析，
+        // 否则"把通用曲线设成 custom"会拿一份默认控制点，把用户调好的形状悄悄丢掉。
+        openCurveCache = resolveCurve(id, openCurveCustom);
+        closeCurveCache = resolveCurve(id, closeCurveCustom);
+        curveCache = openCurveCache;
         save();
     }
 
@@ -752,8 +841,29 @@ public final class TransitionConfig {
         save();
     }
 
+    /** 通用自定义参数：同时套给渐入与渐出（单独调请用另外两个 setter） */
     public static synchronized void setCurveCustom(String value) {
         setCurveCustomInternal(value);
+        setOpenCurveCustomInternal(curveCustom);
+        setCloseCurveCustomInternal(curveCustom);
+        save();
+    }
+
+    /** 设置渐入的自定义控制点，并把渐入切到 custom */
+    public static synchronized void setOpenCurveCustom(String value) {
+        setOpenCurveCustomInternal(value);
+        openCurveId = Curve.CUSTOM_ID;
+        openCurveCache = resolveCurve(openCurveId, openCurveCustom);
+        curveId = openCurveId;
+        curveCache = openCurveCache;
+        save();
+    }
+
+    /** 设置渐出的自定义控制点，并把渐出切到 custom */
+    public static synchronized void setCloseCurveCustom(String value) {
+        setCloseCurveCustomInternal(value);
+        closeCurveId = Curve.CUSTOM_ID;
+        closeCurveCache = resolveCurve(closeCurveId, closeCurveCustom);
         save();
     }
 
@@ -770,20 +880,30 @@ public final class TransitionConfig {
     }
 
     private static void setOpenCurveInternal(String value) {
-        Curve resolved = Curve.byId(value);
-        openCurveId = resolved.id();
-        openCurveCache = resolved;
+        openCurveId = Curve.byId(value).id();
+        openCurveCache = resolveCurve(openCurveId, openCurveCustom);
     }
 
     private static void setCloseCurveInternal(String value) {
-        Curve resolved = Curve.byId(value);
-        closeCurveId = resolved.id();
-        closeCurveCache = resolved;
+        closeCurveId = Curve.byId(value).id();
+        closeCurveCache = resolveCurve(closeCurveId, closeCurveCustom);
     }
 
     private static void setCurveCustomInternal(String value) {
         curveCustom = isValidBezier(value) ? value : DEFAULT_CUSTOM_BEZIER;
         customBezierCache = parseBezier(curveCustom);
+    }
+
+    /** 只刷新自定义控制点（渐入渐出各一份） */
+    private static void setOpenCurveCustomInternal(String value) {
+        openCurveCustom = isValidBezier(value) ? value : DEFAULT_CUSTOM_BEZIER;
+        openCurveCache = resolveCurve(openCurveId, openCurveCustom);
+        curveCache = openCurveCache;
+    }
+
+    private static void setCloseCurveCustomInternal(String value) {
+        closeCurveCustom = isValidBezier(value) ? value : DEFAULT_CUSTOM_BEZIER;
+        closeCurveCache = resolveCurve(closeCurveId, closeCurveCustom);
     }
 
     public static synchronized void setFade(boolean value) {

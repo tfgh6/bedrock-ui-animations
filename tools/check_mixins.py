@@ -328,6 +328,41 @@ def read_text(path):
         return fh.read()
 
 
+def strip_comments(text):
+    """去掉注释，但**保留换行**，这样行号仍然对得上。
+
+    必须去掉：在文档注释里提到 `@Inject` / `@ModifyArg` 是很自然的写法，
+    而注解扫描是按文本匹配的 —— 不剥注释就会把注释当成真的注解，
+    报出一个"没有 method 属性"的假问题。
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            j = skip_string(text, i)
+            out.append(text[i:j])
+            i = j
+            continue
+        if ch == '/' and i + 1 < n:
+            if text[i + 1] == '/':
+                j = text.find('\n', i)
+                j = n if j < 0 else j
+                out.append(' ' * (j - i))
+                i = j
+                continue
+            if text[i + 1] == '*':
+                j = text.find('*/', i + 2)
+                j = n if j < 0 else j + 2
+                out.append(''.join(c if c == '\n' else ' ' for c in text[i:j]))
+                i = j
+                continue
+        out.append(ch)
+        i += 1
+    return ''.join(out)
+
+
 def skip_string(text, i):
     """i 指向开引号，返回闭引号之后的位置（处理转义）"""
     i += 1
@@ -433,31 +468,33 @@ def split_method_spec(spec):
 
 def parse_mixin_file(path):
     text = read_text(path)
-    imports = IMPORT_RE.findall(text)
+    # 扫描用剥掉注释的版本；换行被保留，所以行号仍然准确
+    scan = strip_comments(text)
+    imports = IMPORT_RE.findall(scan)
 
-    m = MIXIN_RE.search(text)
+    m = MIXIN_RE.search(scan)
     target_expr = m.group(1) if m else None
     target = resolve_class(target_expr, imports) if target_expr else None
 
     constants = {}
-    for name, raw in STR_CONST_RE.findall(text):
+    for name, raw in STR_CONST_RE.findall(scan):
         parts = LITERAL_RE.findall(raw)
         if parts:
             constants[name] = "".join(p.encode().decode("unicode_escape") for p in parts)
 
     sites = []
-    for m in ANNOTATION_RE.finditer(text):
-        paren = text.find("(", m.end())
+    for m in ANNOTATION_RE.finditer(scan):
+        paren = scan.find("(", m.end())
         if paren < 0:
             continue
-        end = balanced_block(text, paren)
-        block = text[paren:end]
+        end = balanced_block(scan, paren)
+        block = scan[paren:end]
         sites.append(dict(
             kind=m.group(1),
             method=eval_string_expr(find_attr(block, "method"), constants),
             raw_method=find_attr(block, "method"),
             at_target=eval_string_expr(find_attr(block, "target"), constants),
-            line=text.count("\n", 0, m.start()) + 1,
+            line=scan.count("\n", 0, m.start()) + 1,
         ))
     return target, sites
 
