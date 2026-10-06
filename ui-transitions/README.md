@@ -578,8 +578,12 @@ B 这一步针对的是本项目最容易踩的坑：mixin 配置写的是 `defa
 
 1. **仅在 MC 26.3 上验证**。26.3 之后若原版改动 GUI 渲染管线（渲染状态类构造器签名），相关注入会失效；
    因为做了优雅降级，表现是"没有动画"而不是崩溃，日志里会有 Mixin 告警。
-2. **NeoForge 未实机启动过**（本机只有 1.21.1 的 NeoForge 实例）。该模组不使用任何加载器专有 API，
-   元数据也按官方规范书写，理论上一份 jar 可直接用；若 NeoForge 侧有问题请把日志发我。
+2. ~~**NeoForge 未实机启动过**~~ —— **已在 1.4.1 起实机验证，1.5.0 再次确认**。
+   本机现在有 26.3 的 NeoForge 实例（26.3.0.48-beta + Cloth Config 26.3.159），
+   `neotest/neoforge_test.py` 会真的启动客户端并核对日志。
+   最新一次结果：`结果: PASS —— 模组在真实 NeoForge 26.3.0.48-beta 上加载成功`，
+   命中标记 `已注册 NeoForge 配置入口`。跑法：`tools/verify_all.py --neoforge`。
+   注意**只证明"能加载、配置入口注册成功"**，不验画面。
 3. **哪些是"看图验证"、哪些是"逻辑验证"**，说清楚免得误会：
    - **看图验证**（实机截图）：底板与内容一起滑动/淡变、关闭动画、动画结束后静止、`animatePanel=false` 时底板静止、配置界面各选项。
    - **逻辑验证**（离线断言 + 注入验收）：音效字幕抵消、`fadeDim` 遮罩淡出、各类独立开关、曲线切换、打断接续。
@@ -589,9 +593,10 @@ B 这一步针对的是本项目最容易踩的坑：mixin 配置写的是 `defa
      这两处在你的手机上打开背包时应能直接验证；若字幕仍跟着动，请把界面名与配置发我。
 4. **JEI / REI / EMI 只做了逻辑验证**：按类名/包名前缀匹配（默认 `mezz.jei,dev.emi.emi,me.shedaniel.rei`），
    本机没有安装这些模组，无法实测它们的界面。若某个界面没跟上或不该动，用 `extraScreens` / `excludedScreens` 增删即可，把类名发我我也可以内置默认值。
-5. **两个图形配置入口**：Fabric 侧用 Mod Menu + Cloth Config；Sodium 侧用其官方配置 API 注册整页。
-   NeoForge 侧由 `UiTransitionsNeoForge` 通过 `IConfigScreenFactory` 注册同一个界面，
-   但**未在真实 NeoForge 环境里启动验证过**（本机没有 26.3 的 NeoForge 实例）。
+5. **图形配置入口分三处**：Fabric 侧用 Mod Menu + Cloth Config；Sodium 侧用其官方配置 API 注册整页；
+   NeoForge 侧由 `UiTransitionsNeoForge` 通过 `IConfigScreenFactory` 注册同一个入口页。
+   三处指向的都是**同一个入口页**（`UiTransitionsHubScreen`），所以曲线编辑器与排除界面两边都能进。
+   NeoForge 侧的注册已实机确认（见第 2 条）；但**按钮点开之后的画面没有在 NeoForge 上逐一看过** ——
    Mixin 与动画本身与加载器无关，两个加载器共用同一份实现。
 6. **关闭动画依赖"拦下切屏再补做"**：若玩家在动画进行中退出世界/切服务器，最坏情况是个别界面状态残留；
    动画仅 300ms，实际几乎遇不到。
