@@ -46,6 +46,14 @@ public final class TransitionConfig {
      */
     public static final int MIN_PORTAL_DURATION_MS = 0;
     public static final int MAX_PORTAL_DURATION_MS = 3000;
+    /**
+     * 非零值不能低于这个数。
+     *
+     * 0 的语义是"关掉这个过渡"，是有意为之；但 1..250ms 的遮罩淡出在实机上就是闪一下，
+     * 只会让人以为功能坏了 —— 用户调参时留下的残留值正是这个区间（真实踩过：
+     * 配置里留着 100ms，把下限放开到 0 之后它就真的按 100ms 生效，看上去像"功能没了"）。
+     */
+    public static final int MIN_SENSIBLE_PORTAL_MS = 250;
 
     private static volatile int portalDurationMs = DEFAULT_PORTAL_DURATION_MS;
 
@@ -366,7 +374,17 @@ public final class TransitionConfig {
         tabSwitchMs = clampTabMs(readInt(properties, "tabSwitchMs", tabSwitchMs));
         scrollFadeBand = clampBand(readInt(properties, "scrollFadeBand", scrollFadeBand));
         scrollFadeMin = clampMin(readInt(properties, "scrollFadeMin", scrollFadeMin));
-        portalDurationMs = Math.max(MIN_PORTAL_DURATION_MS, Math.min(MAX_PORTAL_DURATION_MS, readInt(properties, "portalDurationMs", portalDurationMs)));
+        // 迁移：早期版本下限是 100ms，用户很可能在调参时留下一个"极小值"。
+        // 几十毫秒的遮罩淡出等于没有，用户会以为功能坏了 —— 小于这个阈值就当作没设过。
+        int storedPortal = readInt(properties, "portalDurationMs", portalDurationMs);
+        if (storedPortal > 0 && storedPortal < MIN_SENSIBLE_PORTAL_MS) {
+            System.out.println("[UI Transitions] portalDurationMs=" + storedPortal
+                    + "ms 太短（几乎看不见），已按默认 " + DEFAULT_PORTAL_DURATION_MS + "ms 处理；"
+                    + "想彻底关掉这个过渡请把它设成 0");
+            storedPortal = DEFAULT_PORTAL_DURATION_MS;
+        }
+        portalDurationMs = Math.max(MIN_PORTAL_DURATION_MS,
+                Math.min(MAX_PORTAL_DURATION_MS, storedPortal));
         excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
         extraScreens = properties.getProperty("extraScreens", extraScreens);
         // 迁移：老配置里只有一个 durationMs / curve，把它当作渐入渐出共同的值

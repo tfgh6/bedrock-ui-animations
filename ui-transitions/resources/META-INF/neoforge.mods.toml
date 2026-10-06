@@ -5,7 +5,7 @@ iconFile = "assets/ui_transitions/icon.png"
 
 [[mods]]
 modId = "ui_transitions"
-version = "1.3.16"
+version = "1.3.17"
 displayName = "Bedrock UI Animations"
 logoFile = "assets/ui_transitions/icon.png"
 description = '''
@@ -33,7 +33,9 @@ side = "CLIENT"
 
 [[dependencies.ui_transitions]]
 modId = "cloth_config"
-type = "optional"
+# required：本模组的配置界面完全由 Cloth Config 提供，缺了就没法用。
+# 标成 required 之后，即使入口构造函数没跑到，NeoForge 自己也会给出缺依赖的界面。
+type = "required"
 versionRange = "[1,)"
 ordering = "NONE"
 side = "CLIENT"

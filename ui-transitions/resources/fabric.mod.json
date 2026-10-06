@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "ui_transitions",
-  "version": "1.3.16",
+  "version": "1.3.17",
   "name": "Bedrock UI Animations",
   "description": "Bedrock-style slide + fade transitions for container and menu UIs, with per-layer toggles",
   "authors": [
@@ -13,7 +13,8 @@
   "environment": "client",
   "depends": {
     "fabricloader": ">=0.16.0",
-    "minecraft": ">=26.3"
+    "minecraft": ">=26.3",
+    "cloth-config": "*"
   },
   "entrypoints": {
     "client": [
@@ -28,7 +29,6 @@
   },
   "recommends": {
     "modmenu": "*",
-    "cloth-config": "*",
     "sodium": "*"
   },
   "suggests": {

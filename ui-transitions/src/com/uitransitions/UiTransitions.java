@@ -1032,8 +1032,12 @@ public final class UiTransitions {
         }
     }
 
+    /** 遮罩绘制日志只记前若干次，避免刷屏 */
+    private static int VEIL_DRAW_LOGGED;
+
     /** 画遮罩。界面存在时由 Screen 的收尾注入调用，没有界面时由 HUD 注入调用。 */
-    public static void drawPortalVeil(GuiGraphicsExtractor extractor) {        try {
+    public static void drawPortalVeil(GuiGraphicsExtractor extractor) {
+        try {
             if (!TransitionConfig.enabled()) {
                 return;
             }
@@ -1045,9 +1049,21 @@ public final class UiTransitions {
                 return;
             }
             int a = Math.max(0, Math.min(255, Math.round(alpha * 255.0F)));
+            // 前若干次绘制记一行：这样"遮罩到底有没有在画、画出来的透明度是多少"
+            // 就能从日志直接确认，不用再靠肉眼猜（这个功能已经因为看不见而返工过几次）
+            if (VEIL_DRAW_LOGGED < 40) {
+                VEIL_DRAW_LOGGED++;
+                log("遮罩绘制 alpha=" + String.format(java.util.Locale.ROOT, "%.2f", alpha)
+                        + " 尺寸=" + extractor.guiWidth() + "x" + extractor.guiHeight());
+            }
             // 先清掉可能残留的裁剪区：界面画到最后常常还开着 scissor，
-            // 全屏填充被它一裁就只剩中间一块方框 —— 动画结束后看着就像"有个框还在那儿"
-            extractor.disableScissor();
+            // 全屏填充被它一裁就只剩中间一块方框。
+            // 单独包一层：万一这个调用本身不被支持，也不能连累下面的填充。
+            try {
+                extractor.disableScissor();
+            } catch (Throwable ignored) {
+                // 取不到就算了，大不了被裁
+            }
             extractor.fill(0, 0, extractor.guiWidth(), extractor.guiHeight(), a << 24);
         } catch (Throwable t) {
             report("drawPortalVeil", t);
