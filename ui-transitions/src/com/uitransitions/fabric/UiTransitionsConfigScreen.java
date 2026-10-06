@@ -4,6 +4,7 @@ import com.uitransitions.TransitionConfig;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -16,9 +17,52 @@ public final class UiTransitionsConfigScreen {
     private UiTransitionsConfigScreen() {
     }
 
+    /**
+     * 构建配置界面。
+     *
+     * 整段包在 try/catch 里兜底：Cloth Config 的控件很多，万一某个控件在当前版本上
+     * 行为不符，用户点"配置"时应该看到一个能返回的提示页，而不是直接崩在界面上。
+     * （配置文件本身照常可用，手动编辑不受影响。）
+     */
     public static Screen create(Screen parent) {
         TransitionConfig.ensureLoaded();
+        try {
+            return build(parent);
+        } catch (Throwable t) {
+            System.err.println("[UI Transitions] 配置界面构建失败，已回退到提示页（不影响游戏）: " + t);
+            t.printStackTrace();
+            return new FallbackScreen(parent);
+        }
+    }
 
+    /** 兜底页：不做任何自定义绘制，提示直接写在按钮文字上 */
+    private static final class FallbackScreen extends Screen {
+
+        private final Screen parent;
+
+        private FallbackScreen(Screen parent) {
+            super(Component.literal("UI Transitions"));
+            this.parent = parent;
+        }
+
+        @Override
+        protected void init() {
+            int width = Math.min(360, Math.max(120, this.width - 20));
+            addRenderableWidget(Button.builder(
+                            Component.literal("配置界面构建失败，点此返回；可直接编辑 config/ui-transitions.properties"),
+                            // 26.3 的 Minecraft 没有 setScreen，只有 setScreenAndShow
+                            button -> this.minecraft.setScreenAndShow(this.parent))
+                    .bounds((this.width - width) / 2, this.height / 2 - 10, width, 20)
+                    .build());
+        }
+
+        @Override
+        public void onClose() {
+            this.minecraft.setScreenAndShow(this.parent);
+        }
+    }
+
+    private static Screen build(Screen parent) {
         ConfigBuilder builder = ConfigBuilder.create()
                 .setParentScreen(parent)
                 .setTitle(Component.literal("UI Transitions 界面过渡动画"))
@@ -292,7 +336,7 @@ public final class UiTransitionsConfigScreen {
         perScreen.addEntry(entries.startStrList(
                         Component.literal("不做动画的界面（列表）"),
                         splitScreens(TransitionConfig.excludedScreens()))
-                .setDefaultValue(java.util.Collections.emptyList())
+                .setDefaultValue(new java.util.ArrayList<String>())   // 必须可变：Cloth 会在默认值上增删
                 .setExpanded(true)
                 .setTooltip(Component.literal("想让哪个界面恢复成原版，就在这里加一行它的类名或包名。"),
                         Component.literal("按前缀匹配：写 com.example 就能整包关掉，"),
