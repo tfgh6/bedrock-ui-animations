@@ -21,20 +21,23 @@ dependencies {
     // 本模组不需要 Fabric API：只用 loader + Mixin（Mixin 由 loader 自带）
 }
 
+// 工具链用 JDK 25（MC 26.3 的类是 class file v69，只有 JDK 25 能读），
+// 但**编译目标必须是 21**：ui-transitions.mixins.json 声明 compatibilityLevel = JAVA_21，
+// 而且已实机验证过的产物是 v65。这里若放成 25（v69）就会产出与验证过的不等价的字节码。
 tasks.withType(JavaCompile).configureEach {
-    it.options.release = 25
+    it.options.release = 21
     it.options.encoding = 'UTF-8'
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_25
-    targetCompatibility = JavaVersion.VERSION_25
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 // 让 runClient 直接带上可视化测试开关（只有设置 -PvisualTest 时才生效）
 tasks.named('runClient') {
     if (project.hasProperty('visualTest')) {
         jvmArgs "-Duitransitions.visualTest=true",
-                "-Duitransitions.visualTest.dir=${project.projectDir}/visual-out"
+                "-Duitransitions.visualTest.dir=${project.layout.buildDirectory.get().asFile}/visual-out"
     }
 }

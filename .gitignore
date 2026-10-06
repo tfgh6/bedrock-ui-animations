@@ -1,4 +1,4 @@
-﻿# 构建产物
+# 构建产物
 build/
 out/
 *.jar
@@ -8,6 +8,8 @@ out/
 run/
 uitransitions-captures/
 .mixin.out/
+# 模组在游戏目录下生成的配置：属于运行期产物，不是源码
+config/
 # 原版 mod 的分析产物（属于他人作品，不随本项目发布）
 bedrock-ui-animations/
 bedrock-ui-animations-*.jar

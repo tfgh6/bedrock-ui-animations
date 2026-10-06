@@ -8,8 +8,10 @@
 """
 
 import os
+import sys
 
-VERIFY = r"D:\Program Files (x86)\deepseekHarness\Project\verify"
+HERE = os.path.dirname(os.path.abspath(__file__))          # 仓库根
+VERIFY = os.path.join(HERE, "verify")
 STUBS = os.path.join(VERIFY, "stubs")
 
 STUB_SOURCES = {
@@ -70,9 +72,18 @@ public class Minecraft {
     public net.minecraft.client.gui.screens.Screen lastScreen;
     public int setScreenCalls;
     public static Minecraft getInstance() { return INSTANCE; }
-    public void setScreen(net.minecraft.client.gui.screens.Screen screen) {
+
+    /**
+     * 26.3 的 Minecraft **没有** setScreen(Screen)，只有 setScreenAndShow(Screen)。
+     * 这里必须与真实 API 一致：早期版本凭空造了一个 setScreen，
+     * 于是 tickGui 里那句 getMethod("setScreen", ...) 在桩环境能过、在真机抛
+     * NoSuchMethodException，缺陷被完全掩盖。
+     * 真实的 setScreenAndShow 会转调 Gui.setScreen —— 这里照样实现，断言才有意义。
+     */
+    public void setScreenAndShow(net.minecraft.client.gui.screens.Screen screen) {
         lastScreen = screen;
         setScreenCalls++;
+        gui.setScreen(screen);
     }
 }
 """,
@@ -217,10 +228,11 @@ public class VerifyHarness {
                 + " isBackground=" + ctl.getMethod("isBackground").invoke(null));
 
         boolean crashed = false;
+        int failures = 0;
         try {
             // 打开：Gui.setScreen 拦截 -> 登记 OPEN -> 渲染背景层/内容层
             boolean cancelled = (Boolean) intercept.invoke(null, gui, container);
-            System.out.println("STEP4 OPEN     : interceptSetScreen(gui,容器)= " + cancelled + "（false = 不拦截原版切屏，正确）");
+            failures += check("打开容器时不拦截原版切屏", !cancelled, "interceptSetScreen=" + cancelled);
             beginBackground.invoke(null, container);          // ← 原先在此抛 NoSuchMethodError
             System.out.println("STEP4 ALPHA    : beginBackground 后 externalAlpha=" + externalAlpha.invoke(null));
             beginUi.invoke(null, container, extractor);
@@ -231,25 +243,47 @@ public class VerifyHarness {
             // 关闭：当前是容器、目标为 null -> 应拦截原版切屏并开始关闭动画
             java.lang.reflect.Field cur = guiCls.getDeclaredField("current");
             cur.set(gui, container);
-            boolean cancelled2 = (Boolean) intercept.invoke(null, gui, container);
+            intercept.invoke(null, gui, container);
             boolean startedClose = (Boolean) intercept.invoke(null, gui, null);
-            System.out.println("STEP5 CLOSE    : 同屏重设=" + cancelled2 + " , 关闭拦截=" + startedClose
-                    + "（true = 原版 setScreen 被取消，改为播放关闭动画）");
+            failures += check("关闭容器时拦截原版切屏", startedClose, "startedClose=" + startedClose);
 
-            Thread.sleep(400);                                 // 时长默认 320ms
-            System.out.println("STEP5 PROGRESS : closeFinished=" + closeFinished.invoke(null, container)
-                    + " alpha=" + ctl.getMethod("alpha", screenCls).invoke(null, container)
+            // 轮询等动画结束：时长是可配置的，写死 sleep 会让断言随时长变化而失效
+            boolean finished = false;
+            for (int i = 0; i < 60; i++) {
+                if (Boolean.TRUE.equals(closeFinished.invoke(null, container))) {
+                    finished = true;
+                    break;
+                }
+                Thread.sleep(50);
+            }
+            failures += check("关闭动画在 3 秒内结束", finished, "closeFinished=" + finished);
+            System.out.println("STEP5 PROGRESS : alpha=" + ctl.getMethod("alpha", screenCls).invoke(null, container)
                     + " shift=" + ctl.getMethod("shift", screenCls).invoke(null, container));
 
-            tickGui.invoke(null, gui);                         // 动画结束 -> 反射补做真正的 setScreen
             Class<?> mcCls = Class.forName("net.minecraft.client.Minecraft", true, cl);
             Object mc = mcCls.getMethod("getInstance").invoke(null);
             java.lang.reflect.Field last = mcCls.getDeclaredField("lastScreen");
             java.lang.reflect.Field calls = mcCls.getDeclaredField("setScreenCalls");
-            System.out.println("STEP5 DEFERRED : tickGui 后 Gui.current=" + cur.get(gui)
-                    + " , 真实 setScreen 调用次数=" + calls.getInt(mc)
-                    + " 目标=" + last.get(mc) + "（1 次 = 延迟切屏已补做）");
-            System.out.println("STEP6 RESTORE  : 外部 alpha 复位=" + externalAlpha.invoke(null) + "（1.0 = 已复位）");
+            Object mcGui = mcCls.getDeclaredField("gui").get(mc);
+            java.lang.reflect.Field mcCurrent = guiCls.getDeclaredField("current");
+            // 先摆成真实游戏里的状态：Minecraft.gui 正显示着这个容器界面。
+            // 这样"切屏后它变成 null"才是一条有判别力的断言。
+            mcCurrent.set(mcGui, container);
+
+            tickGui.invoke(null, gui);                         // 动画结束 -> 反射补做真正的切屏
+
+            int screenCalls = calls.getInt(mc);
+            failures += check("延迟切屏恰好补做一次", screenCalls == 1,
+                    "真实 setScreenAndShow 调用次数=" + screenCalls + " 目标=" + last.get(mc));
+            // 查的是 Minecraft 自己那个 Gui：tickGui 走的是 Minecraft.getInstance()，
+            // 不是测试里临时 new 出来的那个 Gui 实例。
+            failures += check("补做切屏后 Minecraft.gui 的当前界面已置空",
+                    mcCurrent.get(mcGui) == null, "gui.current=" + mcCurrent.get(mcGui));
+            failures += check("补做切屏的目标确实是 null（关闭界面）", last.get(mc) == null,
+                    "lastScreen=" + last.get(mc));
+            float alphaAfter = ((Number) externalAlpha.invoke(null)).floatValue();
+            failures += check("关闭结束后外部 alpha 复位为 1.0", Math.abs(alphaAfter - 1.0F) < 1.0e-4F,
+                    "externalAlpha=" + alphaAfter);
         } catch (java.lang.reflect.InvocationTargetException e) {
             crashed = true;
             System.out.println("STEP4 PATH FAIL: " + e.getCause());
@@ -259,7 +293,17 @@ public class VerifyHarness {
             System.out.println("RESULT: FAILED —— 该目录下的类存在未解析引用");
             System.exit(3);
         }
+        if (failures > 0) {
+            System.out.println("RESULT: FAILED —— " + failures + " 项断言未通过");
+            System.exit(4);
+        }
         System.out.println("ALL CHECKS PASSED");
+    }
+
+    /** 断言：不通过就记一笔，最后统一以非零退出码结束 */
+    private static int check(String label, boolean ok, String detail) {
+        System.out.printf("%-6s %-28s %s%n", ok ? "[OK]" : "[FAIL]", label, detail);
+        return ok ? 0 : 1;
     }
 }
 """
@@ -269,9 +313,11 @@ def main():
     for rel, src in STUB_SOURCES.items():
         path = os.path.join(STUBS, rel.replace("/", os.sep))
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
+        with open(path, "w", encoding="utf-8", newline="") as fh:
             fh.write(src.lstrip())
-    with open(os.path.join(VERIFY, "VerifyHarness.java"), "w", encoding="utf-8") as fh:
+    harness = os.path.join(VERIFY, "VerifyHarness.java")
+    os.makedirs(os.path.dirname(harness), exist_ok=True)   # 不再依赖上面的循环先建目录
+    with open(harness, "w", encoding="utf-8", newline="") as fh:
         fh.write(HARNESS.lstrip())
     print("桩类与验证程序已生成：%s" % VERIFY)
     print("桩类数量：%d" % len(STUB_SOURCES))

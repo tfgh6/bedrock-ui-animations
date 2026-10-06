@@ -82,10 +82,10 @@ public class VerifyAdvanced {
         Matrix3x2fStack.reset();
         UiTransitions.beginBackgroundLayer(container, extractor);
         float shiftBeforeSubtitle = Matrix3x2fStack.lastTranslateY;
-        UiTransitions.pauseForHud(extractor);
+        UiTransitions.pauseForHud();
         float subtitleCompensation = Matrix3x2fStack.lastTranslateY;
         int subtitleAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
-        UiTransitions.resumeAfterHud(extractor);
+        UiTransitions.resumeAfterHud();
         float restored = Matrix3x2fStack.lastTranslateY;
         UiTransitions.endBackgroundLayer(container, extractor);
         check("字幕默认被抵消位移（不跟着动）",
@@ -191,12 +191,18 @@ public class VerifyAdvanced {
         // ---------- 8b) 关闭时分两段消失：内容先没、底板最后 ----------
         TransitionConfig.setStaggerClose(true);
         TransitionConfig.setAnimatePanel(true);
-        TransitionConfig.setDurationMs(2000);
         gui.setScreen(new Screen());
         Screen closing = new EmptyContainer();
+        // 先把打开动画完整走完（用较短的时长省时间）。
+        // 若在打开到一半时就关闭，"打断接续"会把关闭进度回拨到与当前可见透明度一致的位置；
+        // 而此刻面板几乎是全透明的，于是关闭会被判定为"已经结束"、瞬间完成 ——
+        // 那是正确行为，但那样就测不到关闭中段了。
+        TransitionConfig.setDurationMs(200);
         openPanel(gui, closing);
         UiTransitions.beginContentLayer(closing, extractor);
         UiTransitions.endContentLayer(closing, extractor);
+        Thread.sleep(350);                                    // 等打开动画结束并标记为已就位
+        TransitionConfig.setDurationMs(2000);
         UiTransitions.interceptSetScreen(gui, null);          // 触发关闭
         Thread.sleep(1500);                                   // 约 75% 处
         UiTransitions.beginBackgroundLayer(closing, extractor);
@@ -205,7 +211,9 @@ public class VerifyAdvanced {
         UiTransitions.beginContentLayer(closing, extractor);
         int contentAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
         UiTransitions.endContentLayer(closing, extractor);
-        check("关闭中段：内容层已消失而底板仍在", contentAlpha == 0 && panelAlpha > 0,
+        // staggerClose 的语义是"内容比底板**更早**淡完"（当前提前约 8%，见 CONTENT_FADE_SPAN 0.92），
+        // 不是"中段就已经完全消失" —— 那对应的是早期 0.55 的取值。
+        check("关闭中段：内容层比底板淡得更早", contentAlpha < panelAlpha && panelAlpha > 0,
                 "内容=" + contentAlpha + " 底板=" + panelAlpha);
         TransitionConfig.setStaggerClose(false);
         UiTransitions.beginBackgroundLayer(closing, extractor);
@@ -253,6 +261,105 @@ public class VerifyAdvanced {
         check("关掉该选项后恢复位移", overlayShift3 > 0.5F, "位移=" + overlayShift3);
         TransitionConfig.setOverlayModsFadeOnly(true);
         UiTransitions.setOverlayModPresentForTest(null);
+
+        // ---------- 10) 逐槽位淡变：点标签（均匀）与滚动（逐格），快捷栏那一排固定原版 ----------
+        TransitionConfig.setAnimateTabSwitch(true);
+        TransitionConfig.setFade(true);
+        TransitionConfig.setTabSwitchMs(400);
+        TransitionConfig.setScrollFadeBand(200);
+        TransitionConfig.setScrollFadeMin(0);
+        // 打开动画故意设得极短：这样下面测的时候界面早已静止，
+        // 从而验证"逐格淡变不依赖打开/关闭动画"—— 真机上点标签时正是这个状态。
+        TransitionConfig.setDurationMs(150);
+
+        gui.setScreen(new Screen());
+        Screen creative = new EmptyContainer();
+        openPanel(gui, creative);
+        Thread.sleep(250);                              // 让打开动画彻底结束
+
+        // (a) 点分类标签：物品列表淡、玩家快捷栏那一排固定原版
+        UiTransitions.onTabSelected(creative);
+        UiTransitions.beginContentLayer(creative, extractor);
+        UiTransitions.beginTabContent(creative, extractor);     // 每帧都会调（extractRenderState 的 HEAD）
+        UiTransitions.beginSlotFade(false, 100);
+        int tabGridAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endSlotFade(100);
+        UiTransitions.beginSlotFade(true, 200);
+        int tabHotbarAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endSlotFade(200);
+        UiTransitions.endTabContent(creative, extractor);
+        UiTransitions.endContentLayer(creative, extractor);
+        check("点标签时物品列表在淡变", tabGridAlpha < 255, "alpha=" + tabGridAlpha);
+        check("点标签时玩家快捷栏固定为原版（不淡）", tabHotbarAlpha == 255,
+                "alpha=" + tabHotbarAlpha);
+
+        // (b) 等这段淡变走完（beginTabContent 在进度满时会清掉这次换页状态）
+        Thread.sleep(450);
+        UiTransitions.beginContentLayer(creative, extractor);
+        UiTransitions.beginTabContent(creative, extractor);
+        UiTransitions.endTabContent(creative, extractor);
+        UiTransitions.endContentLayer(creative, extractor);
+
+        // (c) 第一帧滚动：只有把格子区上下界记录下来，下一帧才能逐格算
+        UiTransitions.onGridScrollIfChanged(creative, 0.0F);    // 基准，不启动
+        UiTransitions.onGridScrollIfChanged(creative, 0.5F);    // 真的滚了 → 启动
+        UiTransitions.beginContentLayer(creative, extractor);
+        UiTransitions.beginTabContent(creative, extractor);
+        for (int y : new int[] {20, 40, 60, 80, 100, 120, 140, 160, 180}) {
+            UiTransitions.beginSlotFade(false, y);
+            UiTransitions.endSlotFade(y);
+        }
+        UiTransitions.endTabContent(creative, extractor);
+        UiTransitions.endContentLayer(creative, extractor);
+
+        // (d) 让这一段结束，再滚一次：这次有上一帧的边界，可以逐格算了
+        Thread.sleep(450);
+        UiTransitions.onGridScrollIfChanged(creative, 0.8F);
+        UiTransitions.beginContentLayer(creative, extractor);
+        UiTransitions.beginTabContent(creative, extractor);
+        UiTransitions.beginSlotFade(false, 180);        // 紧贴进入边（向下滚 → 进入边在底部）
+        int nearEdge = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endSlotFade(180);
+        UiTransitions.beginSlotFade(false, 20);         // 远离进入边
+        int farFromEdge = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endSlotFade(20);
+        UiTransitions.beginSlotFade(true, 200);         // 快捷栏那一排仍然不许淡
+        int scrollHotbarAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endSlotFade(200);
+        UiTransitions.endTabContent(creative, extractor);
+        UiTransitions.endContentLayer(creative, extractor);
+        check("滚动时靠近进入边的格子更淡", nearEdge < farFromEdge,
+                "进入边=" + nearEdge + " 远端=" + farFromEdge);
+        check("滚动时远端格子比近端明显更不透明", farFromEdge > nearEdge + 100,
+                "进入边=" + nearEdge + " 远端=" + farFromEdge);
+        check("滚动时玩家快捷栏固定为原版（不淡）", scrollHotbarAlpha == 255,
+                "alpha=" + scrollHotbarAlpha);
+
+        // (e) 同一个滚动位置重复喂入不应重置动画（拖动滚动条是每帧调用的）
+        Thread.sleep(60);
+        UiTransitions.onGridScrollIfChanged(creative, 0.8F);    // 同值 → 应被忽略
+        UiTransitions.beginContentLayer(creative, extractor);
+        UiTransitions.beginTabContent(creative, extractor);
+        UiTransitions.beginSlotFade(false, 180);
+        int afterRepeat = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endSlotFade(180);
+        UiTransitions.endTabContent(creative, extractor);
+        UiTransitions.endContentLayer(creative, extractor);
+        check("同一滚动位置重复调用不会重置渐变", afterRepeat > 60,
+                "alpha=" + afterRepeat + "（被重置的话会掉回 0 附近）");
+
+        // (f) 动画结束后必须回到完全不透明。
+        // 先补一次"帧结束"：真实游戏里每帧末尾 ScreenMixin 都会调 endScreenFrame 复原透明度。
+        Thread.sleep(500);
+        UiTransitions.endScreenFrame();
+        UiTransitions.beginContentLayer(creative, extractor);
+        UiTransitions.beginTabContent(creative, extractor);
+        UiTransitions.beginSlotFade(false, 100);
+        int idleAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endSlotFade(100);
+        UiTransitions.endTabContent(creative, extractor);
+        UiTransitions.endContentLayer(creative, extractor);
+        check("原地淡变结束后槽位恢复不透明", idleAlpha == 255, "alpha=" + idleAlpha);
 
         TransitionConfig.resetToDefaults();
         System.out.println();
@@ -321,6 +428,6 @@ public class VerifyAdvanced {
         System.out.printf("%-6s %-40s %s%n", ok ? "[OK]" : "[FAIL]", label, detail);
     }
 
-    static class EmptyContainer extends AbstractContainerScreen {
+    static class EmptyContainer extends AbstractContainerScreen<Object> {
     }
 }
