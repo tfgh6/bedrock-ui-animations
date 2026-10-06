@@ -169,6 +169,28 @@ public class VerifyAdvanced {
                 fallbackAlpha == frameAlpha && fallbackAlpha != 255,
                 "层内=" + frameAlpha + " 兜底=" + fallbackAlpha);
 
+        // ---------- 7a-2) 提取阶段结束后，物品提交仍要拿到动画透明度 ----------
+        // 物品是在**渲染阶段**才从图集提交的，而 FRAME_ALPHA 在 endScreenFrame
+        // （提取阶段收尾）就被复位成 1 了。若 beginItemSubmit 读 FRAME_ALPHA，
+        // 没被登记过的物品就会全不透明地留在画面上 —— 关闭动画里的"残影"就是这个。
+        // 这里按真实时序来：beginContentLayer -> endScreenFrame -> 提交物品。
+        TransitionConfig.setDurationMsBoth(2000);
+        gui.setScreen(new Screen());
+        Screen itemHost = new EmptyContainer();
+        openPanel(gui, itemHost);
+        UiTransitions.beginContentLayer(itemHost, extractor);
+        UiTransitions.endContentLayer(itemHost, extractor);
+        Thread.sleep(500);
+        UiTransitions.beginContentLayer(itemHost, extractor);
+        UiTransitions.endContentLayer(itemHost, extractor);
+        UiTransitions.endScreenFrame();                     // 提取阶段收尾
+        Object freshItem = new Object();                    // 没被登记过的新物品
+        UiTransitions.beginItemSubmit(freshItem);
+        int lateItemAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+        UiTransitions.endItemSubmit(freshItem);
+        check("提取结束后提交的物品仍跟着动画淡（不是全不透明）",
+                lateItemAlpha > 0 && lateItemAlpha < 255, "alpha=" + lateItemAlpha);
+
         // 非动画帧必须回到完全不透明，否则物品会被残留值错误淡出。
         // 用"同类界面切换被跳过"来构造一个确实不做动画的界面。
         //

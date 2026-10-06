@@ -537,7 +537,13 @@ public final class UiTransitions {
             // 硬约束：物品的透明度不得超过本帧的动画透明度。
             // 渲染状态可能是动画开始前建立的（登记值偏大），若不夹住，
             // 收尾几帧物品会突然比周围更不透明 —— 看起来就是"闪一下"或发白。
-            float frame = FRAME_ALPHA.get();
+            //
+            // 这里必须用 PIP_FRAME_ALPHA 而不是 FRAME_ALPHA：
+            // 物品是在**渲染阶段**才从图集提交的，而 FRAME_ALPHA 在 endScreenFrame
+            // （提取阶段收尾）就被复位成 1 了 —— 用它等于"没登记过的物品一律全不透明"，
+            // 表现就是关闭动画里物品不跟着界面一起淡、留下一排残影。
+            // 画中画当初踩的就是同一个坑，见 PIP_FRAME_ALPHA 的注释。
+            float frame = PIP_FRAME_ALPHA;
             WINDOW_ALPHA.set(alpha == null ? frame : Math.min(alpha, frame));
             PREMULTIPLIED.set(true);       // 物品贴图是预乘 alpha
         } catch (Throwable t) {
