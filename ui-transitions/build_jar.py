@@ -52,6 +52,14 @@ def validate_metadata():
         mods = toml.get("mods") or []
         if not mods or mods[0].get("modId") != fabric["id"]:
             problems.append("neoforge.mods.toml 的 modId 与 fabric.mod.json 的 id 不一致")
+        # 版本号也必须一致。**以前这里只比 modId，从不比 version** ——
+        # 后果是 "改了 fabric.mod.json 却忘了改 toml" 时：jar 名与 MANIFEST 是新版本、
+        # NeoForge 侧却报旧版本，而构建一路绿灯（README 里那句"三处一起改，漏一处打包失败"
+        # 当时是过度承诺）。现在把它变成真闸。
+        if mods and str(mods[0].get("version", "")).strip() != str(fabric["version"]).strip():
+            problems.append(
+                "版本号不一致：fabric.mod.json=%s 而 neoforge.mods.toml=%s（三处必须一起改）"
+                % (fabric["version"], mods[0].get("version")))
         configs = [m.get("config") for m in (toml.get("mixins") or [])]
         if "ui-transitions.mixins.json" not in configs:
             problems.append("neoforge.mods.toml 未声明 mixin 配置")

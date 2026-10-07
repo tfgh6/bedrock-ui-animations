@@ -22,7 +22,8 @@
 - Gradle 工程：`ui-transitions/`（Loom 1.18 + Gradle 9.7.1 + JDK 25）
 - 实机截图：`build/visual-out/`（四态对比图 `montage2.png`）
 - 版本号写在三处，**必须一起改**：`resources/fabric.mod.json`、`resources/META-INF/neoforge.mods.toml`、`gradle.properties`
-  （`build_jar.py` 会校验前两者与 MANIFEST 一致，漏一处直接打包失败）
+  —— `build_jar.py` 会校验 `fabric.mod.json` ↔ `neoforge.mods.toml` ↔ MANIFEST 三者一致，漏一处直接打包失败。
+  （`gradle.properties` 的 `mod_version` 只有 Gradle 那条旁路用，构建脚本读不到它，属于"改了不会报错但会不一致"的一处。）
 
 ---
 

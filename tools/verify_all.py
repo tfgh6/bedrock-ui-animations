@@ -3,18 +3,23 @@
 """
 一键跑完全部验证关卡。**发版前必须全绿。**
 
-关卡（按顺序，任一步失败就停下）：
+关卡（按顺序，任一步失败就停下）。**实际是 7 关**（加 `--neoforge` 是 8 关）：
 
-  1. compile.py        编译（优先用本机真实 NeoForge API，拿不到才用桩类）
-  2. check_mixins.py   Mixin 注入目标核对（defaultRequire=0，没命中只会静默失效）
-  3. run_verify.py     状态机断言（桩类 + 真实 JVM）
-  4. gen_verify.py     确认 verify-uit 与模板一致（防止有人只改了生成物）
-  5. build_jar.py      打包 + 元数据校验 + **产物纯净性硬闸**
-  6. neoforge_test.py  实机启动真实 NeoForge（可选，--neoforge 打开）
+  1. compile.py            编译（优先用本机真实 NeoForge API，拿不到才用桩类）
+  2. check_mixins.py       Mixin 注入目标核对（defaultRequire=0，没命中只会静默失效）
+  3. run_verify.py         状态机断言（桩类 + 真实 JVM）
+  4. gen_verify.py         确认 verify-uit 与模板一致（防止有人只改了生成物）
+  5. check_shared_code.py  共用代码不得引用加载器专属类
+  6. check_lang.py         翻译完整性（代码用到的键必须在两份语言文件里都有）
+  7. build_jar.py          打包 + 元数据校验 + **产物纯净性硬闸**
+  8. neoforge_test.py      实机启动真实 NeoForge（可选，--neoforge 打开）
 
-为什么第 6 关要单独存在：前面五关全是离线的，它们能证明"类型对得上、注入命中、
-状态机正确、包打得干净"，但**证明不了 FML 会不会接受这个 jar**。
-1.3.0~1.4.0 就是因为桩类被打进 jar 触发 JPMS 包冲突，离线五关全绿而 NeoForge 完全无法启动。
+> 这份清单**曾经只写到第 6 关**（漏了 5、6 两关、把 build_jar 记成第 5 关），
+> 与下面的 `stages` 列表对不上。读注释会数错关卡，所以以 `stages` 为准。
+
+为什么第 8 关要单独存在：前面七关全是离线的，它们能证明"类型对得上、注入命中、
+状态机正确、共用代码干净、翻译齐、包打得干净"，但**证明不了 FML 会不会接受这个 jar**。
+1.3.0~1.4.0 就是因为桩类被打进 jar 触发 JPMS 包冲突，离线全绿而 NeoForge 完全无法启动。
 
 用法：
 
