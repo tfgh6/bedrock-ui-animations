@@ -1,5 +1,6 @@
 package com.uitransitions;
 
+import com.uitransitions.anim.ColorMath;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -83,7 +84,12 @@ public final class UiTransitions {
     /**
      * 物品/画中画走的是预乘 alpha 管线（GUI_TEXTURED_PREMULTIPLIED_ALPHA）：
      * 颜色通道本应已经乘过 alpha。只改 alpha 而不动 RGB，元素就会比周围偏亮
-     * —— 这就是"切换时物品突然变亮"的原因。进这条管线时把 RGB 一起按比例缩放。
+     * —— 这就是"切换时物品突然变亮"的原因。
+     *
+     * **注意：`modulate` 已经不再读这个标志**（它改成显式参数了，见 modulate 的注释）。
+     * 这个 ThreadLocal 目前只由 beginItemSubmit / endItemSubmit 设置，没有读者 ——
+     * 它的存在是为了让"是否处于物品提交窗口"这件事仍然可查（第 3 步接通道化时会用到）。
+     * 如果你要在这个窗口里画文字或矩形，**不会再被错当成预乘颜色**了。
      */
     private static final ThreadLocal<Boolean> PREMULTIPLIED = ThreadLocal.withInitial(() -> false);
     /** 本帧的动画透明度：物品渲染状态没登记到（例如状态是在动画开始前建立的）就退回这个值 */
@@ -578,30 +584,33 @@ public final class UiTransitions {
         return modulate(color, WINDOW_ALPHA.get());
     }
 
-    private static int modulate(int color, float alpha) {
+    /**
+     * 按 alpha 调制颜色。
+     *
+     * `premultiplied` 是**显式参数**，不再读那个全局的 `PREMULTIPLIED` 标志。
+     *
+     * 为什么改：原来这里读全局标志，而标志由 `beginItemSubmit` 置位 ——
+     * 于是**物品提交窗口内画出来的任何文字或矩形**都会被当成预乘颜色做 RGB 缩放。
+     * 它至今没暴露，只是因为恰好没有人在那个窗口里画文字（经核查：本方法只有
+     * `applyAlphaBlit` / `applyAlphaText` 两个调用者，物品那条渲染走的是另一条路）。
+     * 但这是**等触发的**结构缺陷：谁哪天在物品窗口里补一行文字就会中招，而且
+     * 表现是"颜色莫名偏暗"这种很难归因的现象。
+     *
+     * 现在判定跟着"这条颜色属于哪条渲染通道"走：
+     *   · 贴图块 / 纯色块 / 文字 → 非预乘（只改 alpha 通道）
+     *   · 物品图集 / 画中画贴回   → 预乘（RGB 一起缩放），由各自那条路显式传入
+     */
+    private static int modulate(int color, float alpha, boolean premultiplied) {
         try {
-            if (alpha >= 0.999F) {
-                return color;
-            }
-            int existing = (color >>> 24) & 0xFF;
-            // 透明度已经很低时直接归零：否则尾部几帧会残留一点亮度，看起来像在闪
-            if (alpha <= 0.04F) {
-                return 0;
-            }
-            if (PREMULTIPLIED.get()) {
-                // 预乘 alpha：RGB 必须一起缩放，否则元素会偏亮（物品尤其明显）
-                int r = Math.round(((color >> 16) & 0xFF) * alpha);
-                int g = Math.round(((color >> 8) & 0xFF) * alpha);
-                int b = Math.round((color & 0xFF) * alpha);
-                int a = Math.round(existing * alpha);
-                return (a << 24) | (r << 16) | (g << 8) | b;
-            }
-            int modulated = Math.max(0, Math.min(255, Math.round(existing * alpha)));
-            return (color & 0xFFFFFF) | (modulated << 24);
+            return ColorMath.apply(color, alpha, premultiplied);
         } catch (Throwable t) {
             report("modulate", t);
             return color;
         }
+    }
+
+    private static int modulate(int color, float alpha) {
+        return modulate(color, alpha, false);
     }
 
     /** GuiItemRenderState 构造完成时登记它当时的透明度 */
@@ -1008,6 +1017,15 @@ public final class UiTransitions {
      */
     private static volatile long chatFadeStartNanos;
     private static volatile boolean chatFadeActive;
+    /**
+     * 本帧算好的聊天淡入系数。
+     *
+     * `applyAlphaText` 是**每次文字绘制**都会调的 —— HUD 一帧几十个文字元素。
+     * 如果在里面现算（`System.nanoTime()` + 曲线查表），聊天淡入的那 260ms 里
+     * 每帧要多算几十次，是白白多出来的开销。
+     * 所以改成"每帧开头算一次、之后都读缓存"（`beginChatRender` 里复位）。
+     */
+    private static volatile float chatFadeFrameAlpha = 1.0F;
     /** 诊断计数：重开接续只打前若干次，避免刷屏 */
     private static int DEBUG_REOPEN;
     /** 上一帧聊天的"指纹"：行数与文字内容，用来判断有没有新消息进来 */
@@ -1025,8 +1043,11 @@ public final class UiTransitions {
             // 常开就等于给整帧的文字都加一次多余的乘法。淡完了就关掉，回到零开销。
             chatFadeActive = isChatFadeConfigured() && chatFadeStartNanos != 0L
                     && System.nanoTime() - chatFadeStartNanos < chatFadeNanos();
+            // 每帧只算一次系数：applyAlphaText 一帧要调几十次，不能每次都现算
+            chatFadeFrameAlpha = chatFadeActive ? computeChatFadeAlpha() : 1.0F;
         } catch (Throwable t) {
             chatFadeActive = false;
+            chatFadeFrameAlpha = 1.0F;
             report("beginChatRender", t);
         }
     }
@@ -1045,15 +1066,17 @@ public final class UiTransitions {
     }
 
     /**
-     * 聊天栏新消息是不是正在淡入；是的话返回当前该乘的系数（否则恒为 1）。
+     * 聊天栏新消息是不是正在淡入；是的话返回本帧该乘的系数（否则恒为 1）。
      *
-     * 计时由"聊天内容指纹变了"触发（见 {@link #noteChatContent}），
-     * 与"哪一帧在画聊天"无关 —— 这样即使聊天被挡住不画，淡入窗口也会自然走完。
+     * **读缓存**，不现算：这个值一帧要取几十次（每次文字绘制），
+     * 真正的计算在 {@link #beginChatRender()} 里一帧一次。
      */
     public static float chatFadeAlpha() {
-        if (!chatFadeActive) {
-            return 1.0F;
-        }
+        return chatFadeActive ? chatFadeFrameAlpha : 1.0F;
+    }
+
+    /** 真正的计算（一帧一次）：由 beginChatRender 调用，不要从绘制路径调 */
+    private static float computeChatFadeAlpha() {
         try {
             long start = chatFadeStartNanos;
             if (start == 0L) {
@@ -1062,14 +1085,12 @@ public final class UiTransitions {
             long fadeNanos = chatFadeNanos();
             long age = System.nanoTime() - start;
             if (age >= fadeNanos) {
-                chatFadeActive = false;
                 return 1.0F;
             }
             float progress = age / (float) fadeNanos;
             return TransitionConfig.curveForCategory(TransitionConfig.UiCategory.CHAT).easeOut(progress);
         } catch (Throwable t) {
-            report("chatFadeAlpha", t);
-            chatFadeActive = false;
+            report("computeChatFadeAlpha", t);
             return 1.0F;
         }
     }

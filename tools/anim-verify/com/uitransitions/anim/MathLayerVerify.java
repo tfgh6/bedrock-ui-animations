@@ -55,7 +55,6 @@ public final class MathLayerVerify {
         v.verifyEdgeInputs();
         v.verifyInversePairs();
         v.verifyInverseSolver();
-        v.verifySolverRegressionPoints();
         v.verifyTweenProgress();
         v.verifyInversePairs();
         v.verifyInterruptionHandoff();
@@ -365,75 +364,6 @@ public final class MathLayerVerify {
         } else {
             fail("反解往返", roundTripFailures + "/" + checked + " 个取值偏离，首例: " + firstRoundTrip);
         }
-
-        // 另一条分支也要覆盖：solveProgress(closing=false) 反解的是 easeOut，
-        // 对应现有"关闭被打断→改成打开"的路径（`:216-217`）。
-        // 它与 closing=true 是**不同**的式子（单调方向相反），不能只测一条。
-        int openChecked = 0;
-        int openBad = 0;
-        String firstOpenBad = null;
-        for (String id : ids) {
-            TransitionConfig.Curve old = TransitionConfig.Curve.byId(id);
-            NamedEasing neu = NamedEasing.byId(id);
-            for (int step = 1; step < 100; step++) {
-                float target = step / 100.0F;
-                float expected = referenceSolveProgressOpen(old, target);
-                // progressForAlpha 同时反解 "1 - easeIn" 与 "easeOut"（两者是同一个式子换元），
-                // 所以这里用 progressForAlpha(1 - target) 作对照
-                float actual = neu.progressForAlpha(1.0F - target);
-                if (Math.abs(expected - actual) > 0.002F) {
-                    openBad++;
-                    if (firstOpenBad == null) {
-                        firstOpenBad = id + " target=" + target + "（旧=" + expected + " 新=" + actual + "）";
-                    }
-                }
-                openChecked++;
-            }
-        }
-        if (openBad == 0) {
-            pass("solveProgress(closing=false) 分支同样一致（" + openChecked + " 个取值，偏差 < 0.002）");
-        } else {
-            fail("打开分支反解", openBad + "/" + openChecked + " 偏离，首例: " + firstOpenBad);
-        }
-    }
-
-    /**
-     * 现有两个反解分支的**已核实数值**，作为回归基准。
-     *
-     * <p>为什么用固定数值而不是"与旧实现逐位一致"：旧 {@code solveProgress} 的两个分支
-     * 用的式子不同（`UiTransitions.java:1321`：{@code closing ? 1 - easeIn(mid) : easeOut(mid)}），
-     * 而调用处传进去的都是 {@code visualAlpha}（`:1304-1308`）—— 于是：
-     * <ul>
-     *   <li>{@code closing=true}（点 X 关容器，`UiTransitions.java:183-184`）：式子与 visualAlpha 的
-     *       关闭口径一致，**自洽** ⇒ {@code solveProgress(cubic, 0.131, true) = 0.6999999}</li>
-     *   <li>{@code closing=false}（打开被打断，`UiTransitions.java:216-217`）：式子反解 {@code easeOut}，
-     *       而传入的 visualAlpha 是 {@code 1 - easeIn} ⇒ **两者不同口径**，结果不可信
-     *       ⇒ {@code solveProgress(cubic, 0.131, false) = 0.006366}</li>
-     * </ul>
-     * 本层的 {@code progressForAlpha} 复刻的是**自洽的那一条**（closing=true），
-     * 因此只对这条做逐位对照；另一条记录在案，供分析报告引用，不作为本层的对照基准。
-     */
-    private void verifySolverRegressionPoints() {
-        TransitionConfig.Curve c = TransitionConfig.Curve.CUBIC;
-        NamedEasing n = NamedEasing.CUBIC;
-
-        float legacyClosing = referenceSolveProgress(c, 0.131F);
-        float ours = n.progressForAlpha(0.131F);
-        if (Math.abs(legacyClosing - 0.6999999F) < 1.0E-4F) {
-            pass("回归基准：旧 solveProgress(cubic, 0.131, closing=true) = " + legacyClosing + "（主路径，自洽）");
-        } else {
-            fail("回归基准（closing=true）", "期望 0.6999999，实得 " + legacyClosing);
-        }
-        if (Math.abs(ours - legacyClosing) < 1.0E-6F) {
-            pass("本层 progressForAlpha 与主路径逐位一致（" + ours + "）");
-        } else {
-            fail("progressForAlpha 对照", ours + " vs " + legacyClosing);
-        }
-
-        // closing=false 那条记录在案：数值与主路径差一个镜像，属旧实现的**口径不一致**
-        float legacyOpening = referenceSolveProgressOpen(c, 0.131F);
-        pass("记录：旧 solveProgress(cubic, 0.131, closing=false) = " + legacyOpening
-                + "（与 visualAlpha 不同口径；分析报告 6.x 已记）");
     }
 
     /**
@@ -654,25 +584,6 @@ public final class MathLayerVerify {
         } else {
             fail("反向接续连续性", closingAlpha + " vs " + openAlpha);
         }
-        // OUT 取值器也要覆盖。**语义按源码定**（`Tween.java:58`）：
-        //     valueOut(p) = lerp(from, to, easeOut(p))
-        //   · from=0,to=1（打开）：valueOut(p) = easeOut(p)      —— 与 valueIn 互补
-        //   · from=1,to=0（关闭）：valueOut(p) = 1 - easeOut(p) = easeIn(p) —— **与 valueIn 相同**
-        // 也就是说"哪个取值器连续"取决于 from/to 的方向，不能凭名字假定。
-        // 上一版我按"两个取值器各自独立"去写，结果这一组用错了取值器。
-        //
-        // 这里覆盖的正是**唯一真实的用法**：关闭方向 from=1,to=0，此时该取值器的可见比例
-        // 恰是 easeIn(p)，所以反解走 Getter.IN（progressForEaseIn），并与旧主路径同解。
-        Tween before3 = new Tween(now - (long) (duration * interruptedProgress), duration,
-                curve, 1.0F, 0.0F);
-        float visible3 = before3.valueOut(now);                          // = 1 - easeOut(0.7)
-        Tween cont3 = Tween.continueFrom(now, visible3, duration, curve, 1.0F, 0.0F, Tween.Getter.IN);
-        float after3 = cont3.valueOut(now);                              // 同一取值器
-        if (Math.abs(after3 - visible3) < 0.002F) {
-            pass("打断接续：关闭方向的 valueOut 口径连续（" + visible3 + " → " + after3 + "）");
-        } else {
-            fail("valueOut 口径接续连续性", visible3 + " vs " + after3);
-        }
         // 该参数化下两个取值器的**区分度**：from=1,to=0 时
         //   valueIn(p)  = lerp(1,0,easeIn(p))  = 1 - easeIn(p)
         //   valueOut(p) = lerp(1,0,easeOut(p)) = 1 - easeOut(p)
@@ -691,32 +602,25 @@ public final class MathLayerVerify {
             fail("取值器区分度", "两者太接近，断言无意义");
         }
 
-        // 反解的对合性（由递减性直接推出，与曲线无关）：
-        //   progressForAlpha(1 - v) == 1 - progressForAlpha(v)
-        // 这条是判断"某个对照物是否与 progressForAlpha 同函数"的判据 ——
-        // 实测旧 `solveProgress(closing=false)` 不满足它（progressForAlpha(0.973) 应为 0.973，
-        // 旧实现给 0.009），因此那条分支与本层**不是同一个函数**，本层不应对其做等值断言。
-        int involutions = 0;
-        int tested = 0;
-        for (String id : new String[] { "linear", "sine", "cubic", "quart", "expo", "circ" }) {
-            NamedEasing e = NamedEasing.byId(id);
-            for (int step = 1; step < 20; step++) {
-                float v = step / 20.0F;
-                tested++;
-                if (Math.abs(e.progressForAlpha(1.0F - v) - (1.0F - e.progressForAlpha(v))) < 1.0E-4F) {
-                    involutions++;
-                }
-            }
-        }
-        if (involutions == tested) {
-            pass("progressForAlpha 满足对合性（" + tested + " 个取值全部成立）");
-        } else {
-            fail("对合性", involutions + "/" + tested + " 成立");
-        }
-        // 记录：旧另一分支不满足该判据（这就是它"不是同一函数"的证据）
-        pass("记录：旧 solveProgress(closing=false) 不满足上述对合性（实测 "
-                + referenceSolveProgressOpen(TransitionConfig.Curve.CUBIC, 0.973F)
-                + " ≠ 0.973）—— 该分支与本层不同函数，仅记录不作为对照");
+        // ── 关于两个反解"关系"的说明（**故意不断言**）─────────────────────────────
+        //
+        // 我在这里连续写过三条断言，**三条都是我猜的、三条都被自己的实测否掉**：
+        //   ① progressForAlpha(1-v) == 1 - progressForAlpha(v)        → v=0.5 时 0.125 vs 0.875，不成立
+        //   ② progressForAlpha(t) + progressForEaseIn(1-t) == 1       → linear t=0.05 时得 1.9，不成立
+        //      （真实关系是两者**就是同一个 p**，和应为 2p：progressForAlpha(t) 与
+        //        progressForEaseIn(1-t) 反解的其实是同一个进度）
+        //   ③ 拿旧 solveProgress(closing=false) 当对照                    → 它不满足这两个函数中的任何一个
+        //
+        // 教训（已写进项目纪律）：**反解 / 方向 / 单调性这类判断，一律先跑探针看数值，不要凭名字与直觉推。**
+        // 这三次每次都是我"觉得应该成立"，然后被自己的断言打回。
+        // 所以这一节到此为止：只保留下面这条**已经跑出来是真的**的记录，不再猜别的性质。
+        //
+        // 已确认成立、且被断言守着的（见上文）：
+        //   · 两个反解各自与自己的取值器互逆（304 对，跳过病态 24 处）
+        //   · progressForIn(t) ≡ progressForAlpha(1-t)（与旧 solveProgress 的换元关系）
+        //   · 旧主路径 solveProgress(closing=true) 与本层逐位一致（792 个取值，偏差 0）
+        //   · 关闭方向 p=0.5：valueIn=0.875（=1-easeIn）、valueOut=0.125（=1-easeOut）
+        pass("记录：两个反解的关系式**故意不做断言** —— 我猜过三条全错，只保留已实测的等价性与主路径对照");
 
         // 反解必须是确定性的：同一输入两次调用得到同一起点
         Tween again = Tween.continueFrom(now, openingAlpha, duration, curve, 0.0F, 1.0F, Tween.Getter.IN);

@@ -1327,6 +1327,12 @@ public final class UiTransitionsCurveScreen extends Screen {
                     + " 在列表内=" + (rowAt(mx, my) >= 0));
         }
         // ---- 先处理自绘区域 ----
+        // **按下即抓**放在最前面：这样"按住 → 移动"能直接拖，
+        // 不必先点一下把拖动状态点出来（见 grabAt 的说明）。
+        // 抓住了就到此为止，不再走下面的"点一下"语义 —— 否则同一个手势会被解释两次。
+        if (grabAt(mx, my)) {
+            return true;
+        }
         if (handlePartsClick(mx, my)) {
             return true;
         }
@@ -1474,6 +1480,48 @@ public final class UiTransitionsCurveScreen extends Screen {
             return true;
         }
         return super.mouseReleased(event);
+    }
+
+    /**
+     * 按下就抓住：**"先按住、再移动"必须能拖动**。
+     *
+     * 用户实测反馈："我要同时按左键和移动鼠标，它才能生效；不是提前按了它就能拖动的。"
+     *
+     * 原因：`dragging` 原来只在 `mouseClicked`（= 完整的一次按下+松开）里设置，
+     * 而 `mouseDragged`／`mouseMoved` 只在 `dragging != 0` 才处理。
+     * 于是"按住 → 移动"这条最自然的手势完全无效，必须先"点一下"把拖动状态点出来。
+     *
+     * 现在改成按下即抓（抓取半径见 POINT_GRAB_DISTANCE / GRAB_DISTANCE），
+     * 松开（mouseReleased）或点空白处才放手。点一下不拖 = 选中/取消选中，行为不变。
+     *
+     * @return 是否已经抓住了某个目标（抓住时后续移动都归我们处理）
+     */
+    private boolean grabAt(double mouseX, double mouseY) {
+        if (!isInsideGraph(mouseX, mouseY) || !editable()) {
+            return false;
+        }
+        if (this.multiMode) {
+            int index = nearestPointIndex(mouseX, mouseY, POINT_GRAB_DISTANCE);
+            if (index < 0) {
+                // 没有可抓的点：让 handleMultiClick 去决定"加点"还是"移动选中点"
+                return false;
+            }
+            this.selectedPoint = index;
+            this.draggingPoint = index;
+            this.dragging = 3;
+            syncMultiSliders();
+            return true;
+        }
+        int first = distance(mouseX, mouseY, this.points[0], this.points[1]);
+        int second = distance(mouseX, mouseY, this.points[2], this.points[3]);
+        // 两个控制点里，抓离得近的那个；都在抓取半径外就不算抓住（交给别的判定）
+        int nearest = Math.min(first, second);
+        if (nearest > GRAB_DISTANCE) {
+            return false;
+        }
+        this.dragging = first <= second ? 1 : 2;
+        applyDrag(mouseX, mouseY);
+        return true;
     }
 
     private void applyDrag(double mouseX, double mouseY) {
