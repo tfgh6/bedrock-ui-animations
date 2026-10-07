@@ -128,23 +128,6 @@ public final class UiTransitionsExclusionsScreen extends Screen {
         this.excludedList.layout(right, HEADER_TOP, each, listHeight);
     }
 
-    /**
-     * 窗口尺寸变了要重排。
-     *
-     * 界面刚被创建时 `this.width/height` 可能还是上一屏的尺寸（创建与上屏不是同一刻），
-     * 只靠 init() 里算一次，列表就会按**错的宽度**摆好、再也不动 ——
-     * 表现成"左边那个列表根本没画出来"。原版在 resize 时会重新调 init()，
-     * 这里补一次重排，代价可忽略。
-     */
-    @Override
-    public void resize(int width, int height) {
-        super.resize(width, height);
-        if (this.seenList != null && this.excludedList != null) {
-            layoutLists();
-            logGeometry();
-        }
-    }
-
     /** 把实际算出来的几何打一行日志：这类"看着没画出来"的问题，数字比截图好判 */
     private void logGeometry() {
         System.out.println("[UI Transitions] 排除界面几何: 界面=" + this.width + "x" + this.height

@@ -168,8 +168,9 @@ final class StackedTextList extends AbstractWidget {
             return;
         }
 
-        // 滚动时让行别画到标题上：只裁列表区，标题与边框留在外面
-        extractor.enableScissor(x + 1, y + headerHeight(), x + w - 1, y + h - 1);
+        // 滚动时让行别画到标题上：只裁列表区，标题与边框留在外面。
+        // 用 beginClip：高度算出来 <=0 时**直接不裁**，而不是把空矩形交给渲染器。
+        boolean clipped = beginClip(extractor, x + 1, y + headerHeight(), x + w - 1, y + h - 1);
         try {
             for (int visibleIndex = 0; visibleIndex < this.visibleRows; visibleIndex++) {
                 int index = this.scroll + visibleIndex;
@@ -201,8 +202,34 @@ final class StackedTextList extends AbstractWidget {
                 }
             }
         } finally {
-            extractor.disableScissor();
+            if (clipped) {
+                extractor.disableScissor();
+            }
         }
+    }
+
+    /**
+     * 开启裁剪区，但**保证不会交出一个空矩形**。
+     *
+     * 26.3 的 GUI 是延迟渲染：`enableScissor` 只是把矩形记进渲染状态，
+     * 真正下发时 `FrontendRenderPass.enableScissor` 会校验
+     * （`IllegalArgumentException: Scissor size must be >0`）——
+     * 也就是说，一旦某个界面把高度算成 0 的裁剪区记了进去，
+     * **崩的不是那一行，而是这一帧稍后的绘制阶段**，堆栈里根本看不到调用者（真实崩溃日志就是这样）。
+     * 所以这里统一兜住：算不出正的宽高就干脆不裁（内容最多越界一点，不会崩游戏）。
+     *
+     * @return 是否真的开启了裁剪（关闭时必须配对调用 disableScissor）
+     */
+    static boolean beginClip(GuiGraphicsExtractor extractor, int x0, int y0, int x1, int y1) {
+        int left = Math.min(x0, x1);
+        int right = Math.max(x0, x1);
+        int top = Math.min(y0, y1);
+        int bottom = Math.max(y0, y1);
+        if (right - left <= 0 || bottom - top <= 0) {
+            return false;
+        }
+        extractor.enableScissor(left, top, right, bottom);
+        return true;
     }
 
     @Override

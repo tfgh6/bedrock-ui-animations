@@ -249,6 +249,20 @@ public final class UiTransitionsCurveScreen extends Screen {
     }
 
     /**
+     * 窗口尺寸变了要重排。
+     *
+     * 原版会在 resize 时重新调 init()，但本界面的布局是"按 dirty 标志在渲染前重建"的，
+     * 所以这里只需要置标志、让下一帧重建一次（**不在 resize 里直接重建**：
+     * 那会在 init 流程中间改控件列表，属于自找麻烦）。
+     * 不这么做的话，转到横屏/分屏后三列布局会保持旧尺寸 —— 与"左列表宽度算错"是同一类问题。
+     */
+    @Override
+    public void resize(int width, int height) {
+        super.resize(width, height);
+        this.widgetsDirty = true;
+    }
+
+    /**
      * 按当前模式摆控件。
      *
      * 切模式（贝塞尔 ↔ 多点）和切编辑对象都会改这里的布局，所以单独抽出来，
@@ -1047,8 +1061,10 @@ public final class UiTransitionsCurveScreen extends Screen {
         int maxSlide = Math.max(6, stageH / 6);
         int offset = Math.round(maxSlide * slide);
 
-        // 面板滑动时会越出预览框，裁掉免得糊到列表上
-        extractor.enableScissor(x + 1, y + 1, x + w - 1, y + h - 1);
+        // 面板滑动时会越出预览框，裁掉免得糊到列表上。
+        // 用 beginClip：高度算成 <=0 时不裁，绝不把空矩形交给延迟渲染管线
+        // （那会崩在**这一帧稍后的绘制阶段**，堆栈里看不到调用者 —— 见 StackedTextList.beginClip 的说明）
+        boolean clipped = StackedTextList.beginClip(extractor, x + 1, y + 1, x + w - 1, y + h - 1);
         UiTransitions.pushPreviewAlpha(alpha);
         try {
             int panelW = Math.min(w - 12, INV_W);
@@ -1059,7 +1075,9 @@ public final class UiTransitionsCurveScreen extends Screen {
             blitVanillaInventory(extractor, px, py, panelW, panelH);
         } finally {
             UiTransitions.popPreviewAlpha();
-            extractor.disableScissor();
+            if (clipped) {
+                extractor.disableScissor();
+            }
         }
 
         // 文字放在面板**外面**，不再压住画面。
