@@ -1,5 +1,7 @@
 package com.uitransitions.fabric;
 
+import com.uitransitions.ModNames;
+import com.uitransitions.ScreenLabels;
 import com.uitransitions.TransitionConfig;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -51,6 +53,8 @@ public final class UiTransitionsExclusionsScreen extends Screen {
 
     private static final int COLOR_TEXT = 0xFFE0E0E0;
     private static final int COLOR_HINT = 0xFF9AA0A6;
+    /** 模组名的颜色：偏青，和类名/包名区分开，一眼能看出"这是谁提供的界面" */
+    private static final int COLOR_MOD = 0xFF6FC3DF;
 
     private final Screen parent;
 
@@ -155,17 +159,46 @@ public final class UiTransitionsExclusionsScreen extends Screen {
         this.hiddenByRules = hidden;
 
         List<List<StackedTextList.Cell>> seenRows = new ArrayList<>();
+        List<List<StackedTextList.Cell>> excludedRows = new ArrayList<>();
         for (String name : this.seen) {
-            seenRows.add(List.of(new StackedTextList.Cell(shortName(name), COLOR_TEXT),
-                    new StackedTextList.Cell("  " + packageOf(name), COLOR_HINT)));
+            // 主行放"认得出来是什么界面"，第二行放"它是谁的、哪个包"。
+            // 用户两条反馈合成的事："不能只把包名列出来，要读到模组的名字"——
+            // 包名对判断"这是谁的界面"几乎没用，模组名才有用；但两者都要能看到，
+            // 挤在一行会互相截断（实机截图确认过），所以分成两行。
+            String friendly = ScreenLabels.displayName(name);
+            String mod = ModNames.modNameFor(name);
+            List<StackedTextList.Cell> row = new ArrayList<>();
+            row.add(new StackedTextList.Cell(
+                    friendly != null ? friendly : shortName(name), COLOR_TEXT));
+            if (mod != null) {
+                row.add(new StackedTextList.Cell("  " + mod, COLOR_MOD));
+            }
+            // 第二行：模组名 + 类名 + 包名。模组名放最前，因为它是最有用的那一个
+            StringBuilder detailText = new StringBuilder();
+            if (mod != null && friendly != null) {
+                detailText.append(mod).append("  ·  ");
+            }
+            if (friendly != null) {
+                detailText.append(shortName(name)).append("  ·  ");
+            }
+            detailText.append(packageOf(name));
+            row.add(StackedTextList.detail(detailText.toString()));
+            seenRows.add(row);
         }
         this.seenList.setRows(seenRows);
 
-        List<List<StackedTextList.Cell>> excludedRows = new ArrayList<>();
         for (String entry : this.excluded) {
             boolean prefix = TransitionConfig.isPrefixEntry(entry);
-            excludedRows.add(List.of(new StackedTextList.Cell(entry,
-                    prefix ? StackedTextList.PREFIX_COLOR : COLOR_TEXT)));
+            List<StackedTextList.Cell> row = new ArrayList<>();
+            String friendly = prefix ? null : ScreenLabels.displayName(entry);
+            row.add(new StackedTextList.Cell(
+                    friendly != null ? friendly : entry,
+                    prefix ? StackedTextList.PREFIX_COLOR : COLOR_TEXT));
+            if (friendly != null) {
+                // 友好名占主行，真类名下沉到第二行 —— 用户要能核对"排掉的到底是哪个类"
+                row.add(StackedTextList.detail(entry));
+            }
+            excludedRows.add(row);
         }
         this.excludedList.setRows(excludedRows);
     }

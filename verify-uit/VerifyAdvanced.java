@@ -1070,6 +1070,33 @@ public class VerifyAdvanced {
                         && TransitionConfig.UiCategory.of(null) == TransitionConfig.UiCategory.OTHER,
                 "=" + TransitionConfig.UiCategory.of("com.example.WeirdScreen"));
 
+        // ---------- 20) 排除列表的显示名：**这一关只能验证退化路径** ----------
+        //
+        // 用户两条反馈合成的一件事："列表要让人认得出来那是哪个界面"：
+        //   · "原版排除界面要标注好是哪个界面，直标注成创造UI界面、聊天框UI这样"；
+        //   · "不能只把包名列出来，要读到模组的名字"。
+        //
+        // 但这一关（run_verify.py）**用的是桩类**，`ScreenLabels` / `ModNames` 都被替换成
+        // "永远返回 null"的替身（见 verify-uit/stubs 下那两个文件的说明）。
+        // 所以这里能验的、也应该验的只有一件事：**解析不出来时不会崩、调用方能退回**。
+        //
+        // 表的内容（"创造物品栏界面"这个名字对不对）由 visualtest 的 hub 阶段
+        // 真机打开排除界面并把控件树 dump 出来看 —— **不在这里假装验过**。
+        {
+            check("显示名解析不出来时不崩（空/未知输入都安全）",
+                    com.uitransitions.ScreenLabels.friendlyName(null) == null
+                            && com.uitransitions.ScreenLabels.displayName("") == null
+                            && com.uitransitions.ScreenLabels.displayName(
+                                    "net.minecraft.client.gui.screens.ChatScreen") == null,
+                    "桩类返回 null 属预期");
+            // 这条是本组的**核心**：排除功能本身绝不能依赖"能不能解析出模组名"。
+            // 解析不出来只是少显示一列，功能必须照旧。
+            check("解析不出模组名时优雅返回 null（排除功能不依赖它）",
+                    com.uitransitions.ModNames.modNameFor(null) == null
+                            && com.uitransitions.ModNames.modNameFor("com.example.NotLoadedScreen") == null,
+                    "桩类返回 null 属预期");
+        }
+
         TransitionConfig.resetToDefaults();
         System.out.println();
         if (failures == 0) {

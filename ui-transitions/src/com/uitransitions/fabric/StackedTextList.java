@@ -38,7 +38,19 @@ final class StackedTextList extends AbstractWidget {
     private static final int COLOR_EMPTY = 0xFF707880;
 
     /** 一行里的一段文字：内容 + 颜色（用来把"前缀"标成另一种颜色） */
-    record Cell(String text, int color) {
+    record Cell(String text, int color, boolean detail) {
+        Cell(String text, int color) {
+            this(text, color, false);
+        }
+    }
+
+    /**
+     * 第二行单元格：不参与主行横向排布，改画在该行**下方**、用次要色。
+     *
+     * 用来放"模组名 / 包名"这类信息 —— 主行留给"认得出来是什么界面"。
+     */
+    static Cell detail(String text) {
+        return new Cell(text, COLOR_MUTED, true);
     }
 
     private final Font font;
@@ -71,6 +83,26 @@ final class StackedTextList extends AbstractWidget {
     void setRows(List<List<Cell>> newRows) {
         this.rows.clear();
         this.rows.addAll(newRows);
+        // 行高按内容自适应：有任何一行带"第二行"格子，整表都用双行高。
+        //
+        // 用"整表统一"而不是逐行不同：逐行不同会让列表看起来参差不齐，
+        // 而且点选命中区（rowIndexAt 用统一 rowHeight 算）也得跟着变复杂 ——
+        // 统一高度换来的是"点哪里都对"。
+        boolean anyDetail = false;
+        for (List<Cell> row : newRows) {
+            for (Cell cell : row) {
+                if (cell.detail()) {
+                    anyDetail = true;
+                    break;
+                }
+            }
+            if (anyDetail) {
+                break;
+            }
+        }
+        this.rowHeight = Math.max(11, this.font.lineHeight + 2)
+                + (anyDetail ? this.font.lineHeight + 1 : 0);
+        this.visibleRows = Math.max(1, (this.getHeight() - headerHeight()) / this.rowHeight);
         clampScroll();
     }
 
@@ -188,8 +220,13 @@ final class StackedTextList extends AbstractWidget {
                 int textY = top + 2;
                 int textX = x + 6;
                 int limit = x + w - 6;
+                StringBuilder detail = new StringBuilder();
                 for (Cell cell : this.rows.get(index)) {
                     // 逐段截断：宁可少画几个字，也不能让文字糊到列表外面去
+                    if (cell.detail()) {
+                        detail.append(cell.text() == null ? "" : cell.text());
+                        continue;
+                    }
                     String text = cell.text() == null ? "" : cell.text();
                     while (!text.isEmpty() && textX + this.font.width(text) > limit) {
                         text = text.substring(0, text.length() - 1);
@@ -199,6 +236,19 @@ final class StackedTextList extends AbstractWidget {
                     }
                     extractor.text(this.font, text, textX, textY, cell.color());
                     textX += this.font.width(text);
+                }
+                // 第二行（次要信息）：模组名 / 包名这类"想看清但不必占主行"的东西。
+                // 用户反馈过"不能只把包名列出来，要读到模组的名字"—— 两者都放主行会互相挤，
+                // 于是主行放"认得出来是什么界面"，第二行放"它是谁的、哪个包"。
+                if (detail.length() > 0) {
+                    String text = detail.toString();
+                    while (!text.isEmpty() && this.font.width(text) > limit - (x + 6)) {
+                        text = text.substring(0, text.length() - 1);
+                    }
+                    if (!text.isEmpty()) {
+                        extractor.text(this.font, text, x + 6, textY + this.font.lineHeight,
+                                COLOR_MUTED);
+                    }
                 }
             }
         } finally {
