@@ -71,6 +71,10 @@ def main():
         ("编译（tools/compile.py）", ["tools/compile.py", "--release", args.release]),
         ("Mixin 注入目标核对（tools/check_mixins.py）", ["tools/check_mixins.py", "--quiet"]),
         ("状态机断言（tools/run_verify.py）", ["tools/run_verify.py"]),
+        # 动画数学层：**必须带 client jar 的 classpath**（对照物是真实的 TransitionConfig.Curve），
+        # 所以它与上一关相反、不能并进无 classpath 的 run_verify.py。
+        # 它守的是"第 1 步行为零变化"这件事 —— 也就是重构最需要的那份证据。
+        ("动画数学层与旧实现逐位一致（tools/anim_verify.py）", ["tools/anim_verify.py"]),
         ("verify-uit 与模板一致性", ["ui-transitions/gen_verify.py", "--check"]),
         ("共用代码不得引用加载器专属类（tools/check_shared_code.py）",
          ["tools/check_shared_code.py", "--quiet"]),
