@@ -26,6 +26,10 @@ RESOURCES = os.path.join(ROOT, "resources")
 
 ARTIFACT_STEM = "Bedrock-UI-Animations"
 
+# 编译期桩类所在的包：这些包属于加载器自己，绝不能被打进本 mod 的 jar。
+# 详见打包循环处的说明（NeoForge 的 JPMS 模块层会因撞包直接拒绝加载）。
+STUB_PACKAGE_PREFIXES = ("net/neoforged/", "net/fabricmc/")
+
 
 def validate_metadata():
     problems = []
@@ -122,8 +126,13 @@ def check_mixin_targets():
     import subprocess
     client_jar = os.path.join(WORK, "build", "mc", "client-26.3.jar")
     cmd = [sys.executable, script, "--client-jar", client_jar, "--quiet"]
+    # 强制子进程用 UTF-8 写 stdout：Python 在**管道**下默认用本地编码
+    # （中文 Windows 上是 GBK），而这里按 utf-8 解码 —— 会解出 GBK 编不回去的
+    # 怪字符（例如 \u013f），下一行 print 直接抛 UnicodeEncodeError，整个打包
+    # 就以退出码 1 崩在"Mixin 目标核对"这一步。实测踩过。
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
     proc = subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+                          encoding="utf-8", errors="replace", env=env)
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if proc.returncode != 0:
         print(out)
@@ -133,6 +142,14 @@ def check_mixin_targets():
 
 
 def main():
+    # 兜底：任何一处打印出现当前控制台编不出来的字符，也只替换、不让打包崩掉。
+    # 打包流程本身只依赖校验返回值，不依赖这些文字的可读性。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     if not os.path.isdir(CLASSES):
         sys.exit("找不到编译产物目录：%s" % CLASSES)
 
@@ -181,13 +198,30 @@ def main():
                 resource_count += 1
                 print("  资源: %s" % rel)
         count = 0
+        skipped = []
         for root, _, files in os.walk(CLASSES):
             for f in sorted(files):
-                if f.endswith(".class"):
-                    full = os.path.join(root, f)
-                    zout.write(full, os.path.relpath(full, CLASSES).replace(os.sep, "/"))
-                    count += 1
+                if not f.endswith(".class"):
+                    continue
+                full = os.path.join(root, f)
+                rel = os.path.relpath(full, CLASSES).replace(os.sep, "/")
+                # 编译期桩类绝不能进 jar：它们与真实加载器**撞包名**，NeoForge 的 JPMS
+                # 模块层会直接抛 ResolutionException，玩家侧表现为"装了这个包就启动不了"
+                # （1.3.19 的实际缺陷）。桩类只用于给 javac 一个签名可查，
+                # 运行期必须由真实加载器提供 —— 它们的包名本来就属于加载器自己。
+                #
+                # 这里只精确排除加载器自有的两个包，而不是整个 net/ 前缀：
+                # 将来若真在本模组里加了 net.* 下的自有类，不能让它被静默漏掉。
+                if rel.startswith(STUB_PACKAGE_PREFIXES):
+                    skipped.append(rel)
+                    continue
+                zout.write(full, rel)
+                count += 1
         print("已写入 class 文件: %d，资源文件: %d" % (count, resource_count))
+        if skipped:
+            print("已跳过编译期桩类 %d 个（不打包，运行期由真实加载器提供）:" % len(skipped))
+            for rel in skipped:
+                print("  跳过: %s" % rel)
 
     with zipfile.ZipFile(OUT_JAR) as z:
         names = z.namelist()

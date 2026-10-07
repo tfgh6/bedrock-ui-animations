@@ -40,6 +40,16 @@ JDK_CANDIDATES = [
 
 PROGRAMS = ["VerifyTransitions", "VerifyAdvanced"]
 
+# 子进程一律强制 UTF-8 输出，与下面的 encoding="utf-8" 对齐。
+#
+# 为什么必须显式强制：JDK 在**管道**下写 stdout 用的是**本地编码**（中文 Windows 上是 GBK），
+# 而本脚本按 utf-8 解码 —— 中文标签会被解成乱码，GBK 表示不了的字还会让 print 直接抛
+# UnicodeEncodeError，整条命令以退出码 1 崩掉、一条断言结果都打不出来。
+# JDK 19+ 起支持 stdout.encoding / stderr.encoding 属性（本项目要 JDK 25 工具链，满足）。
+# 修这里而不是改 encoding=：这样无论控制台代码页是什么，输出都稳定可读。
+_UTF8 = ["-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8"]
+_JAVAC_UTF8 = ["-J" + flag for flag in _UTF8]
+
 
 def find_jdk():
     for base in JDK_CANDIDATES:
@@ -58,6 +68,14 @@ def java_sources(root):
 
 
 def main():
+    # 兜底：即使某个子进程仍吐出当前控制台编不出来的字符，也只替换、不崩。
+    # 断言本身的判定只依赖 ASCII 的 [OK] / [FAIL] / ALL CHECKS PASSED，不受影响。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--keep", action="store_true", help="保留编译产物")
     args = parser.parse_args()
@@ -89,7 +107,8 @@ def main():
     os.makedirs(OUT, exist_ok=True)
 
     print("编译 %d 个文件（桩类 + 核心状态机 + 断言程序）" % len(sources))
-    compile_cmd = [javac, "-J-Duser.language=en", "--release", "21", "-proc:none", "-nowarn",
+    compile_cmd = [javac, "-J-Duser.language=en"] + _JAVAC_UTF8 + [
+                   "--release", "21", "-proc:none", "-nowarn",
                    "-encoding", "UTF-8", "-d", OUT] + sources
     proc = subprocess.run(compile_cmd, capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
@@ -114,7 +133,7 @@ def main():
             print("运行 %s" % program)
             print("=" * 70)
             run = subprocess.run(
-                [java, "-Duitransitions.gamedir=" + gamedir, "-cp", OUT, program],
+                [java] + _UTF8 + ["-Duitransitions.gamedir=" + gamedir, "-cp", OUT, program],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=gamedir)
             print((run.stdout or "").rstrip())
             if run.stderr.strip():
