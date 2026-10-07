@@ -221,8 +221,36 @@ public final class UiTransitions {
                 }
                 long backdate = 0L;
                 if (CLOSING.containsKey(target)) {
-                    backdate = backdateNanos(
-                            solveProgress(TransitionConfig.openCurve(), visualAlpha(target), false), openDuration);
+                    // 目标透明度来自 `visualAlpha(target)`。此刻 target 还在 CLOSING 里，
+                    // 所以它走的是 `1.0F - curve.easeIn(p)` 这条**递减**式子 ——
+                    // 因此第三个参数必须是 true（按 1-easeIn 反解）。
+                    //
+                    // 早先这里传的是 false（按 easeOut 反解一个递增式子），等于去找一个
+                    // 不存在的根：实测 solveProgress(cubic, 0.131, false) = 0.0457，
+                    // 代回去得到 0.0063 而不是 0.131。表现是"打开播到一半被关掉、再打开"
+                    // 时透明度跳一下。
+                    //
+                    // 曲线取 `closeCurve()` 而不是 `openCurve()`：**必须与 visualAlpha 读的那条
+                    // 是同一条**，否则反解出来的进度对不上可见值，接续仍然会跳。
+                    // （`curveFor` 依赖 CLOSING，等下面 remove 之后就查不到这条了，所以这里直接取。）
+                    Close interrupted = CLOSING.get(target);
+                    float handoff = solveProgress(TransitionConfig.closeCurve(),
+                            visualAlpha(target), true);
+                    // **回拨必须用"算出这个进度的那段动画"的时长**（关闭段的），
+                    // 不是接下来的渐入时长 —— 见 progress() 上面那段注释，这是同一条规矩。
+                    // 用错时长会让新动画的起点整体偏移（实测跳变 43/255）。
+                    backdate = interrupted != null
+                            ? backdateNanos(handoff, interrupted.durationNanos())
+                            : backdateNanos(handoff, openDuration);
+                    if (DEBUG_REOPEN < 20) {
+                        DEBUG_REOPEN++;
+                        log("重开接续: 可见=" + visualAlpha(target)
+                                + " 反解进程=" + handoff
+                                + " 关闭段时长=" + (interrupted == null ? -1
+                                        : interrupted.durationNanos() / 1_000_000L) + "ms"
+                                + " 渐入时长=" + (openDuration / 1_000_000L) + "ms"
+                                + " 回拨=" + (backdate / 1_000_000L) + "ms");
+                    }
                     CLOSING.remove(target);
                 }
                 OPEN_START.put(target, new Open(now - backdate, openDuration));
@@ -980,6 +1008,8 @@ public final class UiTransitions {
      */
     private static volatile long chatFadeStartNanos;
     private static volatile boolean chatFadeActive;
+    /** 诊断计数：重开接续只打前若干次，避免刷屏 */
+    private static int DEBUG_REOPEN;
     /** 上一帧聊天的"指纹"：行数与文字内容，用来判断有没有新消息进来 */
     private static volatile int chatLineCount = -1;
     private static volatile int chatContentHash;

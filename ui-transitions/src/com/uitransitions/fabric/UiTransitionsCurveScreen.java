@@ -63,10 +63,28 @@ public final class UiTransitionsCurveScreen extends Screen {
     /** 画图时上下各留出一点空间，这样带回弹过冲的曲线也画得下 */
     private static final float VIEW_MIN = -0.5F;
     private static final float VIEW_MAX = 1.5F;
-    private static final int HANDLE_RADIUS = 5;
-    private static final int GRAB_DISTANCE = 18;
-    /** 多点模式下，离已有点多近才算"抓这个点"而不是"在这里加一个点" */
-    private static final int POINT_GRAB_DISTANCE = 14;
+    /**
+     * 小方块的**视觉**半径。
+     *
+     * 这个值和命中范围是**两件事**，故意不成比例：方块画小（少挡内容、看得清曲线），
+     * 命中范围给大（手指按得到）。用户实测反馈就是"那几个方块太挡了、还得按到正中间"，
+     * 所以两个方向一起调 —— 只放大命中、不缩小视觉，或者反过来，都不解决问题。
+     */
+    private static final int HANDLE_RADIUS = 4;
+    private static final int GRAB_DISTANCE = 22;
+    /**
+     * 多点模式下，离已有点多近才算"抓这个点"而不是"在这里加一个点"。
+     *
+     * **这个值是按触屏定的，不是按鼠标定的。** 用户手机上（逻辑分辨率 427x240 附近、
+     * GUI 缩放 0~3 档）拖动"必须按到正中间"才能抓住 —— 原来的 14px 在那种屏幕上
+     * 只有指甲盖大小。触屏需要 ~9mm 的容错，换算到逻辑像素大约 28~34。
+     *
+     * 放大它的代价是"想加点时可能误抓附近的点"，但抓错了还能拖/删，
+     * 而**抓不到是根本没法操作**。两害相权取其轻。
+     */
+    private static final int POINT_GRAB_DISTANCE = 30;
+    /** 图框外的容错边距：指尖很难精确落在框内，稍微出去一点也算在图里 */
+    private static final int GRAPH_SLOP = 10;
 
     /** 原版背包贴图是 176x166，放在 256x256 的图里 */
     private static final int INV_W = 176;
@@ -313,8 +331,11 @@ public final class UiTransitionsCurveScreen extends Screen {
         this.listX = showList ? this.width - margin - listActual : this.width + 1;
         this.listY = 44;
 
+        // 图比别的东西重要：它是**用户唯一能直接操作**的东西，所以优先把宽度给它。
+        // 预览只是"看一眼效果"，做小一点不影响操作 —— 用户明确要求过"预览做小、图做大"。
+        int maxPreview = 96;
         int remaining = this.width - margin * 2 - (showList ? listActual + gap : 0);
-        int columnWidth = Math.max(minGraph, Math.min(150, remaining / 4));
+        int columnWidth = Math.max(minGraph, Math.min(200, remaining / 3));
         this.graphX = margin;
         this.graphY = 44;
 
@@ -325,7 +346,7 @@ public final class UiTransitionsCurveScreen extends Screen {
         boolean showSliders = this.height - bottomBar - this.graphY - slidersBlock - 16 >= 56;
         slidersBlock = showSliders ? slidersBlock : 0;
         int available = this.height - bottomBar - this.graphY - slidersBlock - 16;
-        this.graphSize = Math.max(56, Math.min(130, Math.min(columnWidth, available)));
+        this.graphSize = Math.max(56, Math.min(200, Math.min(columnWidth, available)));
 
         this.sliderX = this.graphX;
         this.sliderY = this.graphY + this.graphSize + 14;
@@ -340,7 +361,9 @@ public final class UiTransitionsCurveScreen extends Screen {
 
         this.previewX = this.graphX + columnWidth + 14;
         this.previewY = this.graphY;
-        this.previewWidth = Math.max(110, this.listX - 14 - this.previewX);
+        // 预览：**故意做小**（用户要求"预览做小、图做大"）。它是只读的示范动画，
+        // 宽度只影响观感；而图是唯一的操作面，宽度直接决定能不能点准。
+        this.previewWidth = Math.max(72, Math.min(maxPreview, this.listX - 14 - this.previewX));
         this.previewHeight = Math.max(60, this.height - bottomBar - this.previewY - 18);
 
         buildButtons();
@@ -1006,8 +1029,11 @@ public final class UiTransitionsCurveScreen extends Screen {
             return false;
         }
         int y = rowTop(row);
-        return mouseX >= this.listX + 2 && mouseX <= this.listX + this.listWidth - 2
-                && mouseY >= y && mouseY < y + ROW_HEIGHT - 1;
+        // **整行、整高都算命中**：原来上下各缩 1px、左右各缩 2px，看着没差多少，
+        // 但用户实机反馈是"得按到正中间才有效果" —— 触屏上一条 22px 高的行本来就窄，
+        // 再缩一圈就只剩中间一小块了。行与行之间本来就有分隔，不需要靠缩边距来区分。
+        return mouseX >= this.listX && mouseX <= this.listX + this.listWidth
+                && mouseY >= y && mouseY < y + ROW_HEIGHT;
     }
 
     /** 行首那个小方框的命中区 */
@@ -1353,13 +1379,15 @@ public final class UiTransitionsCurveScreen extends Screen {
             // 把选中的点挪到这里 —— 手机上主要靠这条
             if (this.selectedPoint >= 0) {
                 this.multi = interiorOf(TransitionConfig.Curve.moveMulti(
-                        fullMulti(), this.selectedPoint, fromScreenX(mouseX), fromScreenY(mouseY)));
+                        fullMulti(), this.selectedPoint,
+                        fromScreenX(clampToGraphX(mouseX)), fromScreenY(clampToGraphY(mouseY))));
                 syncMultiSliders();
             }
             return;
         }
         float[] before = fullMulti();
-        float[] after = TransitionConfig.Curve.insertMulti(before, fromScreenX(mouseX), fromScreenY(mouseY));
+        float[] after = TransitionConfig.Curve.insertMulti(before,
+                fromScreenX(clampToGraphX(mouseX)), fromScreenY(clampToGraphY(mouseY)));
         if (after != before) {
             this.multi = interiorOf(after);
             this.selectedPoint = nearestPointIndex(mouseX, mouseY, POINT_GRAB_DISTANCE);
@@ -1381,8 +1409,24 @@ public final class UiTransitionsCurveScreen extends Screen {
 
     /** 鼠标是不是在图框里（留几像素余量，贴着边框点也算） */
     private boolean isInsideGraph(double mouseX, double mouseY) {
-        return mouseX >= this.graphX - 2 && mouseX <= this.graphX + this.graphSize + 2
-                && mouseY >= this.graphY - 2 && mouseY <= this.graphY + this.graphSize + 2;
+        return mouseX >= this.graphX - GRAPH_SLOP && mouseX <= this.graphX + this.graphSize + GRAPH_SLOP
+                && mouseY >= this.graphY - GRAPH_SLOP
+                && mouseY <= this.graphY + this.graphSize + GRAPH_SLOP;
+    }
+
+    /**
+     * 把屏幕坐标夹进图框内。
+     *
+     * 用于"在图框边缘附近按下"的情况：容错边距让 GRAPH_SLOP 范围内的点击也算作在图里，
+     * 但**坐标本身要夹进合法范围**，否则会把点放到 x<0 或 y>1 的位置上
+     * （曲线数据的合法域由 TransitionConfig 那侧再夹一次，但这里先夹能少一次无用写入）。
+     */
+    private double clampToGraphX(double mouseX) {
+        return Math.max(this.graphX, Math.min(this.graphX + this.graphSize, mouseX));
+    }
+
+    private double clampToGraphY(double mouseY) {
+        return Math.max(this.graphY, Math.min(this.graphY + this.graphSize, mouseY));
     }
 
     /** 离鼠标最近的那个**内部点**；超出 maxDistance 返回 -1 */

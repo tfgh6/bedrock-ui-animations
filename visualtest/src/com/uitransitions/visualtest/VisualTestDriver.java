@@ -1318,11 +1318,14 @@ public final class VisualTestDriver {
                 log(String.format("布局：界面=%dx%d 图=%d@x%d 预览=%d@x%d 列表x=%d 显示列表=%s 预览右缘到列表=%d",
                         screen.width, screen.height, graphSize, graphX, previewWidth, previewX,
                         listX, showList, gap));
-                if (previewWidth <= 111 && screen.width >= 700) {
-                    log("!! 问题：预览宽度被兜到了下限（" + previewWidth
-                            + "），而窗口宽度有 " + screen.width + " —— 说明宽度算错了（曾经真的发生过）");
+                // 预览宽度**故意做小**：用户明确要求"预览做小、图做大"，所以宽屏下
+                // 预览停在 96 是预期结果，不再是"宽度算错了"。
+                // 真正要拦的是"图被挤小"——图是唯一能操作的地方，它小了就是功能不可用。
+                if (graphSize < 88 && screen.width >= 700) {
+                    log("!! 问题：图只有 " + graphSize + "px（宽屏下应优先给图，见 layoutColumns）");
                 } else {
-                    log("布局检查：预览宽度正常 ✅");
+                    log("布局检查：图宽度正常 ✅（预览已按用户要求做小，宽度="
+                            + previewWidth + "）");
                 }
                 if (showList && listX + readIntField(screen, "listWidth") > screen.width) {
                     log("!! 问题：动画列表超出了右边缘");

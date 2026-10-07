@@ -113,6 +113,57 @@ public class VerifyAdvanced {
                 handoffAlpha < 200 && handoffAlpha > 0, "接续 alpha=" + handoffAlpha);
         check("打断后位移不为 0（继续往下走）", handoffShift > 0.5F, "接续位移=" + handoffShift);
 
+        // ---------- 5c) 触屏可用性：命中范围必须**明显大于**视觉方块 ----------
+        //
+        // 这条拦的是一类具体的可用性问题（用户实测反馈）：
+        // "那几个方块太挡了，而且我得按到正中间才能拖"。
+        // 也就是说：方块画得大、命中范围却和方块一样大 —— 屏幕上又挡内容、又按不准。
+        // 正确做法是两者**故意不成比例**：画小、命中大。
+        //
+        // 断言用反射读常量，是为了让"以后有人把 POINT_GRAB_DISTANCE 调回 14"这件事
+        // 直接变红，而不是又等用户按不动了才发现。
+        {
+            // 注意：`UiTransitionsCurveScreen` 在 fabric/ 下、依赖 MC 类型，
+            // 而这一关（run_verify.py）**只编译 UiTransitions + TransitionConfig 两个源文件**，
+            // 所以它在这里根本不在 classpath 上 —— 类拿不到时**明确跳过并说明**，
+            // 不要假装验证过，也不要让它红（红了会掩盖真正的问题）。
+            Class<?> curveScreen = null;
+            try {
+                curveScreen = Class.forName("com.uitransitions.fabric.UiTransitionsCurveScreen");
+            } catch (Throwable ignored) {
+                System.out.println("[SKIP] 曲线编辑器的命中范围断言：该类不在本关 classpath"
+                        + "（离线链只编 2 个源文件）。这条比例关系目前由人工核对 + "
+                        + "visualtest 的 curveui 阶段覆盖。");
+            }
+            if (curveScreen != null) {
+                int handleRadius = readStaticInt(curveScreen, "HANDLE_RADIUS");
+                int grab = readStaticInt(curveScreen, "GRAB_DISTANCE");
+                int pointGrab = readStaticInt(curveScreen, "POINT_GRAB_DISTANCE");
+                check("视觉方块半径保持小巧（不挡内容）", handleRadius <= 5,
+                        "HANDLE_RADIUS=" + handleRadius);
+                check("两点命中范围是视觉半径的 3 倍以上（手指按得到）",
+                        pointGrab >= handleRadius * 3,
+                        "POINT_GRAB_DISTANCE=" + pointGrab + " vs HANDLE_RADIUS=" + handleRadius);
+                check("拖动命中范围也大于视觉半径（不只是多点那条路）",
+                        grab > handleRadius,
+                        "GRAB_DISTANCE=" + grab);
+            }
+        }
+
+        // 说明：这里**没有**"关闭到一半又被重新打开"的断言。
+        //
+        // 那条路径（interceptSetScreen 里 CLOSING.containsKey(target) 的分支）需要
+        // **真实客户端的 setScreen 拦截**才会走到：离线直接调 interceptSetScreen /
+        // gui.setScreen 时 CLOSING 里没有条目，分支根本不进（我按这个思路写的断言
+        // 实测打不出任何诊断行，而且它在离线永远红 —— 一条"我知道测不到还留着"的断言
+        // 比没有更糟，所以删掉了）。
+        //
+        // 那条路径的正确性靠两样东西保证：
+        //   · 数学层的独立验证（tools/anim_verify.py 用真实 TransitionConfig.Curve 反解对照）；
+        //   · 真实客户端上的观感（打开一半被关掉再打开，不应看到透明度跳变）。
+        // 该分支已修的两处：solveProgress 的 closing 参数用错（应 true）、
+        // 回拨时长用错（应用"算出该进度的那段动画"的时长）。
+
         // ---------- 6) 果冻回弹：0 = 关闭，>0 时打开过程中会冲过静止位置 ----------
         TransitionConfig.setJelly(0.0F);
         float noJelly = openShiftAtPeak(container, gui, extractor);
@@ -1022,8 +1073,14 @@ public class VerifyAdvanced {
         gui.setScreen(screen);
     }
 
-    private static void check(String label, boolean ok, String detail) {
-        if (!ok) {
+    /** 反射读一个 private static int 常量（用于断言"命中范围 vs 视觉尺寸"这类比例关系） */
+    private static int readStaticInt(Class<?> owner, String name) throws Exception {
+        java.lang.reflect.Field field = owner.getDeclaredField(name);
+        field.setAccessible(true);
+        return field.getInt(null);
+    }
+
+    private static void check(String label, boolean ok, String detail) {        if (!ok) {
             failures++;
         }
         System.out.printf("%-6s %-40s %s%n", ok ? "[OK]" : "[FAIL]", label, detail);

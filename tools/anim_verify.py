@@ -119,7 +119,8 @@ def main():
           % (len(sources), os.path.basename(mc_jar)))
     compile_cmd = [javac, "-J-Duser.language=en", "--release", "21", "-proc:none", "-nowarn",
                    "-encoding", "UTF-8", "-cp", mc_jar, "-d", OUT] + sources
-    x
+    proc = subprocess.run(compile_cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=CHILD_ENV)
     if proc.stdout.strip():
         print(proc.stdout.strip())
     if proc.stderr.strip():

@@ -654,29 +654,69 @@ public final class MathLayerVerify {
         } else {
             fail("反向接续连续性", closingAlpha + " vs " + openAlpha);
         }
-        // OUT 取值器也要覆盖：用 Getter.OUT 接续后，valueOut 口径同样必须连续。
-        // 注意**不能**断言"换取值器后两个口径相等" —— valueIn 与 valueOut 本来就是两个函数。
-        // （本轮把这条写进过断言，是错的：valueIn 测到 0.657 时 valueOut 根本不是 0.657。）
+        // OUT 取值器也要覆盖。**语义按源码定**（`Tween.java:58`）：
+        //     valueOut(p) = lerp(from, to, easeOut(p))
+        //   · from=0,to=1（打开）：valueOut(p) = easeOut(p)      —— 与 valueIn 互补
+        //   · from=1,to=0（关闭）：valueOut(p) = 1 - easeOut(p) = easeIn(p) —— **与 valueIn 相同**
+        // 也就是说"哪个取值器连续"取决于 from/to 的方向，不能凭名字假定。
+        // 上一版我按"两个取值器各自独立"去写，结果这一组用错了取值器。
+        //
+        // 这里覆盖的正是**唯一真实的用法**：关闭方向 from=1,to=0，此时该取值器的可见比例
+        // 恰是 easeIn(p)，所以反解走 Getter.IN（progressForEaseIn），并与旧主路径同解。
         Tween before3 = new Tween(now - (long) (duration * interruptedProgress), duration,
                 curve, 1.0F, 0.0F);
-        float visible3 = before3.valueOut(now);                          // valueOut 口径
-        Tween cont3 = Tween.continueFrom(now, visible3, duration, curve, 1.0F, 0.0F, Tween.Getter.OUT);
+        float visible3 = before3.valueOut(now);                          // = 1 - easeOut(0.7)
+        Tween cont3 = Tween.continueFrom(now, visible3, duration, curve, 1.0F, 0.0F, Tween.Getter.IN);
         float after3 = cont3.valueOut(now);                              // 同一取值器
         if (Math.abs(after3 - visible3) < 0.002F) {
-            pass("打断接续：valueOut 口径同样连续（" + visible3 + " → " + after3 + "）");
+            pass("打断接续：关闭方向的 valueOut 口径连续（" + visible3 + " → " + after3 + "）");
         } else {
             fail("valueOut 口径接续连续性", visible3 + " vs " + after3);
         }
-        // 与旧实现另一条分支自洽：solveProgress(closing=false) 反解的是 easeOut（`:1321`），
-        // 本层对应 progressForAlpha(1 - v)（同式换元）
-        float legacyOut = referenceSolveProgressOpen(TransitionConfig.Curve.CUBIC, visible3);
-        float oursOut = curve.progressForAlpha(1.0F - visible3);
-        if (Math.abs(oursOut - legacyOut) < 2.0E-3F) {
-            pass("与旧另一分支同解（progressForAlpha(1-" + visible3 + ") = " + oursOut
-                    + " ≈ 旧 " + legacyOut + "）");
+        // 该参数化下两个取值器的**区分度**：from=1,to=0 时
+        //   valueIn(p)  = lerp(1,0,easeIn(p))  = 1 - easeIn(p)
+        //   valueOut(p) = lerp(1,0,easeOut(p)) = 1 - easeOut(p)
+        // 在 p=0.5 处：easeIn=.125、easeOut=.875 ⇒ valueIn=.875、valueOut=.125（两者差 0.75）
+        Tween probe = new Tween(now - (long) (duration * 0.5F), duration, curve, 1.0F, 0.0F);
+        float probeIn = probe.valueIn(now);
+        float probeOut = probe.valueOut(now);
+        if (Math.abs(probeIn - 0.875F) < 1.0E-5F && Math.abs(probeOut - 0.125F) < 1.0E-5F) {
+            pass("关闭方向 p=0.5：valueIn=" + probeIn + "、valueOut=" + probeOut + "（= 1-easeIn / 1-easeOut）");
         } else {
-            fail("与旧另一分支同解", legacyOut + " vs " + oursOut);
+            fail("关闭方向取值器语义", "valueIn=" + probeIn + "、valueOut=" + probeOut + "，期望 0.875 / 0.125");
         }
+        if (Math.abs(probeIn - probeOut) > 0.1F) {
+            pass("两个取值器在关闭方向**不同**（差 " + Math.abs(probeIn - probeOut) + "）");
+        } else {
+            fail("取值器区分度", "两者太接近，断言无意义");
+        }
+
+        // 反解的对合性（由递减性直接推出，与曲线无关）：
+        //   progressForAlpha(1 - v) == 1 - progressForAlpha(v)
+        // 这条是判断"某个对照物是否与 progressForAlpha 同函数"的判据 ——
+        // 实测旧 `solveProgress(closing=false)` 不满足它（progressForAlpha(0.973) 应为 0.973，
+        // 旧实现给 0.009），因此那条分支与本层**不是同一个函数**，本层不应对其做等值断言。
+        int involutions = 0;
+        int tested = 0;
+        for (String id : new String[] { "linear", "sine", "cubic", "quart", "expo", "circ" }) {
+            NamedEasing e = NamedEasing.byId(id);
+            for (int step = 1; step < 20; step++) {
+                float v = step / 20.0F;
+                tested++;
+                if (Math.abs(e.progressForAlpha(1.0F - v) - (1.0F - e.progressForAlpha(v))) < 1.0E-4F) {
+                    involutions++;
+                }
+            }
+        }
+        if (involutions == tested) {
+            pass("progressForAlpha 满足对合性（" + tested + " 个取值全部成立）");
+        } else {
+            fail("对合性", involutions + "/" + tested + " 成立");
+        }
+        // 记录：旧另一分支不满足该判据（这就是它"不是同一函数"的证据）
+        pass("记录：旧 solveProgress(closing=false) 不满足上述对合性（实测 "
+                + referenceSolveProgressOpen(TransitionConfig.Curve.CUBIC, 0.973F)
+                + " ≠ 0.973）—— 该分支与本层不同函数，仅记录不作为对照");
 
         // 反解必须是确定性的：同一输入两次调用得到同一起点
         Tween again = Tween.continueFrom(now, openingAlpha, duration, curve, 0.0F, 1.0F, Tween.Getter.IN);
