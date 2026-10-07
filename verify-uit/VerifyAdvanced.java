@@ -449,13 +449,70 @@ public class VerifyAdvanced {
         UiTransitions.endSlotFade(20);
         UiTransitions.beginSlotFade(true, 200);         // 快捷栏那一排仍然不许淡
         int scrollHotbarAlpha = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
-        UiTransitions.endSlotFade(200);
+        UiTransitions.endSlotFade(200, true);           // ← 固定行：不参与边界记录
         UiTransitions.endTabContent(creative, extractor);
         UiTransitions.endContentLayer(creative, extractor);
         check("滚动时靠近进入边的格子更淡", nearEdge < farFromEdge,
                 "进入边=" + nearEdge + " 远端=" + farFromEdge);
         check("滚动时远端格子比近端明显更不透明", farFromEdge > nearEdge + 100,
                 "进入边=" + nearEdge + " 远端=" + farFromEdge);
+
+        // (e) **固定的行不得污染"格子区上下界"** —— 这条为一个真实 bug 而写。
+        //
+        // 玩家背包那几行在物品网格**下方**，而 noteGridSlot 原来无条件记录所有格子，
+        // 于是下界被拉到屏幕底部（`GRID_BOUNDS[1]` 变大）。滚动渐变的进入边就是 bounds[1]，
+        // 所以下一帧起"离进入边近"的判定全部错位 —— 本该固定不动的那几行反而最淡。
+        //
+        // **必须跨帧测**：slotFloorAlpha 读的是 GRID_BOUNDS（上一帧提交的），
+        // 本帧 noteGridSlot 只写 GRID_BOUNDS_NOW。我第一版把两侧测量写在同一帧里，
+        // 于是污染还没生效、断言恒真 —— 反向验证（把守卫去掉）竟然全绿，才发现。
+        {
+            // 第 1 帧：**对照**，边界由网格自己（20..180）决定，不掺固定的行
+            UiTransitions.beginContentLayer(creative, extractor);
+            UiTransitions.beginTabContent(creative, extractor);
+            for (int y : new int[] {20, 60, 100, 140, 180}) {
+                UiTransitions.beginSlotFade(false, y);
+                UiTransitions.endSlotFade(y, false);
+            }
+            UiTransitions.endTabContent(creative, extractor);     // ← 提交边界
+            UiTransitions.endContentLayer(creative, extractor);
+
+            // 第 2 帧：量一次（此时边界 = 20..180）
+            UiTransitions.beginContentLayer(creative, extractor);
+            UiTransitions.beginTabContent(creative, extractor);
+            UiTransitions.beginSlotFade(false, 180);
+            int withoutPinned = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+            UiTransitions.endSlotFade(180, false);
+            UiTransitions.endTabContent(creative, extractor);
+            UiTransitions.endContentLayer(creative, extractor);
+
+            // 第 3 帧：这一次在网格下方插入两行"固定"格子（模拟玩家背包）
+            UiTransitions.beginContentLayer(creative, extractor);
+            UiTransitions.beginTabContent(creative, extractor);
+            for (int y : new int[] {20, 60, 100, 140, 180}) {
+                UiTransitions.beginSlotFade(false, y);
+                UiTransitions.endSlotFade(y, false);
+            }
+            for (int y : new int[] {230, 260}) {                  // ← 网格下方的固定行
+                UiTransitions.beginSlotFade(true, y);
+                UiTransitions.endSlotFade(y, true);
+            }
+            UiTransitions.endTabContent(creative, extractor);     // ← 提交边界
+            UiTransitions.endContentLayer(creative, extractor);
+
+            // 第 4 帧：再用同一个 slotY 量一次。边界若被污染，这个值会明显变亮
+            UiTransitions.beginContentLayer(creative, extractor);
+            UiTransitions.beginTabContent(creative, extractor);
+            UiTransitions.beginSlotFade(false, 180);
+            int withPinned = UiTransitions.applyAlphaBlit(0xFFFFFFFF) >>> 24;
+            UiTransitions.endSlotFade(180, false);
+            UiTransitions.endTabContent(creative, extractor);
+            UiTransitions.endContentLayer(creative, extractor);
+
+            check("网格下方的固定行不改变别的格子的渐变量（边界不被污染）",
+                    withPinned == withoutPinned,
+                    "无固定行=" + withoutPinned + " 有固定行=" + withPinned);
+        }
         check("滚动时玩家快捷栏固定为原版（不淡）", scrollHotbarAlpha == 255,
                 "alpha=" + scrollHotbarAlpha);
 

@@ -843,6 +843,13 @@ public final class UiTransitions {
     }
 
     public static void endSlotFade(int slotY) {
+        endSlotFade(slotY, false);
+    }
+
+    /**
+     * @param pinned true = 这一格是"固定原版"的那几格（玩家快捷栏/背包行）
+     */
+    public static void endSlotFade(int slotY, boolean pinned) {
         try {
             if (!SLOT_FADED.get()) {
                 return;
@@ -851,6 +858,18 @@ public final class UiTransitions {
             if (saved != null) {
                 WINDOW_ALPHA.set(saved);
                 FRAME_ALPHA.set(saved);
+            }
+            // **被固定的格子不参与"格子区上下界"的计算。**
+            //
+            // 原来这里无条件记录，于是玩家背包那几行（在物品网格**下方**）把下界拉到屏幕底部，
+            // 而滚动渐变是"离进入边越近越淡"：底部进入时，那几行离进入边最近，
+            // 按公式算出来就是**最淡的** —— 结果本该固定不动的行反而闪得最厉害。
+            // （用户反馈："那几行也跟着渐入渐出，还有闪烁"。）
+            //
+            // 它们本来就不参与滚动渐变（beginSlotFade 里 pinToVanilla 直接 return 了），
+            // 那就不该影响别人的边界。
+            if (pinned) {
+                return;
             }
             noteGridSlot(slotY);
         } catch (Throwable t) {
