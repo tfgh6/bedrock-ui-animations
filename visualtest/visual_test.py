@@ -78,6 +78,9 @@ PHASES = {
 
 WORLD_PHASES = {"world", "inventory", "enchant", "creative"}
 
+# --strict 时，日志里的 ❌ 会让本步骤失败。默认关闭（见 main 末尾的说明）。
+STRICT = False
+
 # 子进程一律用 UTF-8：这套脚本和它调用的工具都会打印中文，
 # 而 Windows 上 Python 默认按 GBK 编码 stdout，直接跑会 UnicodeEncodeError。
 PY = [sys.executable, "-X", "utf8"]
@@ -285,6 +288,9 @@ def summarize(phases):
     # 它们不带"失败"二字。只按词筛的话，一次已经失败的运行会被汇总成
     # "（没有失败/警告）" —— 这一轮就真的这么发生过：configclick 明明 ❌ 了，
     # 汇总却说一切正常，全靠去看截图文件名才发现。
+    #
+    # 返回值 = 日志里有几条 ❌。调用方据此决定要不要让本步骤失败（见 main 的 --strict）。
+    fails = 0
     if os.path.isfile(LOG_PATH):
         interesting = []
         checked = 0
@@ -294,16 +300,25 @@ def summarize(phases):
                     continue
                 if "✅" in line or "❌" in line:
                     checked += 1
+                if "❌" in line:
+                    fails += 1
                 if "失败" in line or "警告" in line or "根因" in line or "❌" in line:
                     interesting.append(line.strip())
         print("\n  测试日志里值得注意的行:")
         if checked:
-            print("    （驱动共做出 %d 条带结论的检查）" % checked)
+            print("    （驱动共做出 %d 条带结论的检查，其中 ❌ %d 条）" % (checked, fails))
         if interesting:
             for line in interesting[:25]:
                 print("    %s" % line)
         else:
             print("    （没有失败/警告）")
+        if fails:
+            print("\n  ⚠️ 日志里有 %d 条 ❌。%s"
+                  % (fails, "已按 --strict 判为失败" if STRICT else
+                     "默认不算失败（加 --strict 让它影响退出码）"))
+    else:
+        print("\n  找不到日志文件，无法汇总：%s" % LOG_PATH)
+    return fails
 
 
 def main():
@@ -315,7 +330,12 @@ def main():
     parser.add_argument("--no-launch", action="store_true", help="只编译，不启动游戏")
     parser.add_argument("--keep", action="store_true",
                         help="保留 build/visual-out 里上一轮的截图（默认会先清空，避免新旧混淆）")
+    parser.add_argument("--strict", action="store_true",
+                        help="日志里出现 ❌ 就让本步骤失败（CI / 发版前用；默认只看游戏退出码）")
     args = parser.parse_args()
+
+    global STRICT
+    STRICT = bool(args.strict)
 
     if args.list:
         print("可选阶段（--phases a,b）:")
@@ -380,8 +400,17 @@ def main():
         for line in tail:
             print("    " + line, file=sys.stderr)
         return code
-    summarize(phases)
+    fails = summarize(phases)
     print("\n完成。截图在 %s" % OUT_DIR)
+    # **--strict：让日志里的 ❌ 真正影响退出码。**
+    #
+    # 默认不加，是为了不破坏现有的"看截图"工作流 —— 玩家/我平时跑它主要是为了拿图。
+    # 但"只有游戏进程非 0 才算失败"意味着：驱动判定了 ❌、退出码仍是 0，
+    # 自动化层面这是一条假绿通道（另一个会话审出来时只修了"人不容易漏看"，没接判定）。
+    # CI 或发版前请加 --strict。
+    if STRICT and fails:
+        print("\n!! --strict：日志里有 %d 条 ❌，判为失败" % fails, file=sys.stderr)
+        return 1
     return 0
 
 

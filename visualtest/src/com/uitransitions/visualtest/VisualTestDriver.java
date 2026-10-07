@@ -117,8 +117,55 @@ public final class VisualTestDriver {
         if (phaseEnabled("config")) {
             log("打开图形化配置界面");
             openConfigScreen(minecraft);
-            sleep(2500);
+            // **分三段走，全程按真实用户路径**：
+            //   ① `openConfigScreen` 打开的是**入口页**（不是 Cloth 页）——
+            //      模组故意加了一层入口页，因为 Cloth 里那个自绘条目真实鼠标点不到；
+            //   ② 在入口页上点「界面动画设置」，这才是真的 Cloth 配置页；
+            //   ③ 每一步都**等到界面真的变了**，别用固定 sleep。
+            //
+            // 为什么不能只看"不是入口页"：点开时会先"拦下切屏播关闭动画"，
+            // 那期间 `screen()` 还是**上一个**界面（标题界面），既不是入口页也不是配置页 ——
+            // 条件会立刻满足，抓到标题界面。实测就是这么假绿的。
+            boolean sawHub = waitForScreenNamed(minecraft, "HubScreen", 20_000L);
+            if (sawHub) {
+                log("已到入口页，点「界面动画设置」进 Cloth 配置页");
+                clickButtonByKey(minecraft, "界面动画设置", "ui_transitions.hub.config");
+            } else {
+                log("❌ 20 秒内没到入口页");
+            }
+            Screen now = null;
+            long deadline = System.currentTimeMillis() + 20_000L;
+            while (System.currentTimeMillis() < deadline) {
+                now = minecraft.gui.screen();
+                if (now != null && !now.getClass().getSimpleName().contains("HubScreen")
+                        && !now.getClass().getSimpleName().contains("TitleScreen")) {
+                    break;
+                }
+                sleep(200);
+            }
+            String name = now == null ? "null" : now.getClass().getSimpleName();
+            boolean isCloth = now != null && now.getClass().getName().contains("clothconfig");
+            log("配置界面当前屏幕 = " + name
+                    + (isCloth ? "  ✅（Cloth 配置页）" : "  ❌（不是 Cloth 配置页，抓到的是别的界面）"));
+            sleep(800);
             capture(minecraft, outDir, "configgui", System.nanoTime(), 0);
+            // 切到「按界面分类」页再扫：**Cloth 只为当前选中的标签页创建条目**，
+            // 在默认打开的「动画」页那棵树里搜分类分组，永远搜不到 ——
+            // 我第一版就是这么误报成"6 个分组一个都没建出来"的。
+            // 切到「按界面分类」页并抓图。
+            //
+            // **判定用什么**：Cloth 只为当前选中的标签页创建条目，而且它的分组标题是
+            // **自己画上去的**、不在控件树的 getMessage() 里 —— 所以"按文本扫分组"这条路走不通
+            // （我先后按翻译键、按显示名扫，两次都报 0/6，而截图里分组明明都在）。
+            // 这里只可靠地判定"标签页切过去了"（抓图前缀就是证据），
+            // 页面内容由截图人工确认 —— 并把控件树文本记一行，方便以后排查。
+            if (isCloth) {
+                clickButtonByKey(minecraft, "按界面分类", "ui_transitions.config.category.by_screen");
+                sleep(1500);
+                capture(minecraft, outDir, "configgui_categories", System.nanoTime(), 0);
+                log("已切到「按界面分类」并抓图 configgui_categories_*.png（分组是 Cloth 自绘的，"
+                        + "无法从控件树里核，请看截图）");
+            }
         }
 
         // ---------- 配置界面里的"打开曲线编辑器"入口能不能点开 ----------
@@ -953,6 +1000,57 @@ public final class VisualTestDriver {
         } catch (Throwable t) {
             return "读取失败: " + t;
         }
+    }
+
+    /**
+     * 把整个界面树（含嵌套子控件）的翻译键拼成一行。
+     *
+     * `describeChildren` 只看一层，而 Cloth 的条目是层层嵌套的 ——
+     * 要确认"某一页里的分组建出来了"，必须递归。
+     */
+    private static String describeWidgetTree(Object root) {
+        StringBuilder sb = new StringBuilder();
+        collectWidgetKeys(root, sb, 0);
+        return sb.toString();
+    }
+
+    private static void collectWidgetKeys(Object node, StringBuilder sb, int depth) {
+        if (node == null || depth > 6) {
+            return;
+        }
+        try {
+            Object message = node.getClass().getMethod("getMessage").invoke(node);
+            if (message != null) {
+                sb.append(message).append(' ');
+            }
+        } catch (Throwable ignored) {
+            // 没有文字的控件
+        }
+        java.util.List<?> children;
+        try {
+            children = (java.util.List<?>) node.getClass().getMethod("children").invoke(node);
+        } catch (Throwable t) {
+            return;
+        }
+        if (children == null) {
+            return;
+        }
+        for (Object child : children) {
+            collectWidgetKeys(child, sb, depth + 1);
+        }
+    }
+
+    /** 等某个类名（简单名包含即可）成为当前界面；超时返回 false。只能在驱动线程调用。 */
+    private static boolean waitForScreenNamed(Minecraft minecraft, String simpleNamePart, long timeoutMs) {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            Screen current = minecraft.gui.screen();
+            if (current != null && current.getClass().getSimpleName().contains(simpleNamePart)) {
+                return true;
+            }
+            sleep(150);
+        }
+        return false;
     }
 
     /** 界面当前有多少个控件（用来判断 init() 是否已经跑完 —— setScreen 只是排队） */
