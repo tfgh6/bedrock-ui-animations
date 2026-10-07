@@ -341,6 +341,31 @@ public class VerifyAdvanced {
         check("点标签时玩家快捷栏固定为原版（不淡）", tabHotbarAlpha == 255,
                 "alpha=" + tabHotbarAlpha);
 
+        // (a2) **同一件事的文字通道** —— 快捷栏物品的"数量文字"走 applyAlphaText，不走 blit。
+        //
+        // 这条断言是为一个真实回归补的，而且它已经复发过一次：
+        //   · 1.4.0：只置回 WINDOW_ALPHA，pip 兜底仍读到淡变中的 PIP_FRAME_ALPHA → 图标淡；
+        //   · 1.5.01：补了 pip，却漏了 TEXT_ALPHA → **图标不淡、数字在淡**，
+        //     用户看到的仍然是"点标签时整个 UI 都在渐变，快捷栏也不固定"。
+        // 上面那条 tabHotbarAlpha 用的是 applyAlphaBlit，所以它对这类问题**完全无感** ——
+        // 这就是它能复发的原因：覆盖的是物品通道，坏的是文字通道。
+        {
+            UiTransitions.beginContentLayer(creative, extractor);
+            UiTransitions.beginTabContent(creative, extractor);
+            // 冻结前先记一下：确认这段确实是"在淡变中"（否则下面那条断言会因为没淡而假过）
+            int textBeforeFreeze = UiTransitions.applyAlphaText(0xFFFFFFFF) >>> 24;
+            UiTransitions.pauseForTabStatic(extractor);        // 快捷栏绘制开始
+            int hotbarTextDuring = UiTransitions.applyAlphaText(0xFFFFFFFF) >>> 24;
+            UiTransitions.resumeAfterTabStatic(extractor);     // 快捷栏绘制结束
+            UiTransitions.endTabContent(creative, extractor);
+            UiTransitions.endContentLayer(creative, extractor);
+
+            check("点标签时界面文字确实在淡变（否则下面那条会假过）", textBeforeFreeze < 255,
+                    "alpha=" + textBeforeFreeze);
+            check("点标签时快捷栏的数量文字固定为原版（文字通道也冻结）", hotbarTextDuring == 255,
+                    "alpha=" + hotbarTextDuring + "（冻结前=" + textBeforeFreeze + "）");
+        }
+
         // (b) 等这段淡变走完（beginTabContent 在进度满时会清掉这次换页状态）
         Thread.sleep(450);
         UiTransitions.beginContentLayer(creative, extractor);

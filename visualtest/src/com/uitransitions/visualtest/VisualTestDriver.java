@@ -181,8 +181,7 @@ public final class VisualTestDriver {
         // 开出来的界面类名对不对。这正是用户抱怨过"点了没反应"的那一类问题。
         if (phaseEnabled("hub")) {
             log("=== 入口页按钮检查 ===");
-            openHub(minecraft);
-            sleep(2000);
+            openHub(minecraft);            sleep(2000);
             capture(minecraft, outDir, "hub", System.nanoTime(), 0);
             // 先把入口页上的控件列一遍：按钮文字对不上、位置算错、控件没建出来，
             // 这三种原因的修法完全不同，一眼看清能省一轮往返。
@@ -218,7 +217,11 @@ public final class VisualTestDriver {
             sleep(1200);
         }
 
-        // ---------- 曲线编辑器（不需要世界） ----------
+        // ---------- 窄窗口下进入口页（复现手机上的 Scissor 864x0 崩溃） ----------
+        if (phaseEnabled("hubnarrow")) {
+            log("=== 窄窗口复现（手机 Scissor 864x0）===");
+            runHubNarrowPhase(minecraft, outDir);
+        }
         if (phaseEnabled("curve")) {
             log("打开曲线编辑器（渐入）");
             openCurveEditor(minecraft, "OPEN");
@@ -852,6 +855,84 @@ public final class VisualTestDriver {
                 }
             }
         });
+    }
+
+    /**
+     * 窄窗口下进入口页 —— 复现用户手机上的 `Scissor size must be >0, was 864x0` 崩溃。
+     *
+     * ## 为什么要单独一个阶段
+     *
+     * 用户的崩溃日志显示：崩溃发生在**进入入口页后约 1 秒**（`ModsScreen -> UiTransitionsHubScreen`
+     * 之后立刻 `ReportedException: Render Frame`），异常是
+     * `FrontendRenderPass.enableScissor: Scissor size must be >0, was 864x0`。
+     *
+     * 两个特征和桌面测试环境完全不同，必须一起复现才有意义：
+     *   · **极端宽高比**（手机逻辑分辨率约 427x240 / 595x270，宽高比 ~1.8~2.2）——
+     *     `864` 这个宽度很可能就是它缩放后的 GUI 宽度；
+     *   · **位移 200px 在 270px 高的屏幕上**意味着内容被推得只剩一小条在屏内，
+     *     任何"按屏内可见区域算"的裁剪矩形都可能塌成 0 高。
+     *
+     * 26.3 的裁剪是**延迟下发**的：`enableScissor` 只记录，真正校验发生在
+     * `GuiRenderer.executeDraw`，所以崩的是"这一帧稍后的绘制"、堆栈里看不到调用者 ——
+     * 这正是它难查的原因。所以这里只能靠"把窗口做成那个形状"来复现。
+     */
+    private static void runHubNarrowPhase(Minecraft minecraft, File outDir) {
+        // 目标：接近手机的宽高比。864 宽是崩溃日志里给出的实际宽度。
+        int[][] sizes = { { 864, 270 }, { 960, 450 }, { 1280, 300 } };
+        for (int[] size : sizes) {
+            boolean resized = resizeWindow(minecraft, size[0], size[1]);
+            log("窄窗口复现：尝试 " + size[0] + "x" + size[1]
+                    + (resized ? "  ✅ 已调整" : "  ❌ 调整失败（这个阶段复现不了）"));
+            sleep(1500);
+            log("  当前 GUI 尺寸 = " + minecraft.getWindow().getGuiScaledWidth()
+                    + "x" + minecraft.getWindow().getGuiScaledHeight()
+                    + "  guiScale=" + minecraft.getWindow().getGuiScale());
+            openHub(minecraft);
+            sleep(3000);
+            // 崩溃会直接把游戏带走（进程非 0），所以能走到这里就说明这个尺寸没崩
+            String screen = minecraft.gui.screen() == null
+                    ? "null" : minecraft.gui.screen().getClass().getSimpleName();
+            log("  " + size[0] + "x" + size[1] + " 下进入口页后仍在运行，当前界面 = " + screen);
+            capture(minecraft, outDir, "hubnarrow_" + size[0] + "x" + size[1], System.nanoTime(), 0);
+        }
+        resizeWindow(minecraft, 1280, 720);
+        sleep(500);
+    }
+
+    /**
+     * 改窗口大小。失败返回 false。
+     *
+     * **必须在渲染线程执行**：`Window.setWindowed` 会碰渲染系统，从驱动线程直接调会抛
+     * `IllegalStateException: Rendersystem called from wrong thread`（实测如此）。
+     * 这里用 `minecraft.execute` 投过去，然后**等真正生效**再返回 —— 不能只 sleep 猜。
+     */
+    private static boolean resizeWindow(Minecraft minecraft, int width, int height) {
+        final java.util.concurrent.atomic.AtomicReference<Throwable> error =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        minecraft.execute(() -> {
+            try {
+                minecraft.getWindow().setWindowed(width, height);
+            } catch (Throwable t) {
+                error.set(t);
+            }
+        });
+        // 等到窗口尺寸真的变了（或超时）
+        long deadline = System.currentTimeMillis() + 8000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (error.get() != null) {
+                log("  改窗口尺寸失败: " + error.get());
+                return false;
+            }
+            if (minecraft.getWindow().getScreenWidth() == width
+                    && minecraft.getWindow().getScreenHeight() == height) {
+                return true;
+            }
+            sleep(150);
+        }
+        log("  改窗口尺寸超时（当前 "
+                + minecraft.getWindow().getScreenWidth() + "x"
+                + minecraft.getWindow().getScreenHeight() + "）");
+        return false;
     }
 
     /** 打开入口页（Hub）。它才是用户点「配置」之后真正看到的第一屏。 */

@@ -20,6 +20,14 @@ package com.uitransitions.anim;
  */
 public record Tween(long startNanos, long durationNanos, Easing easing, float from, float to) {
 
+    /** 取值方向：调用方接下来**实际用哪个取值器**。 */
+    public enum Getter {
+        /** 用 {@link Tween#valueIn} 取值 —— 可见比例 = {@code easeIn(p)} */
+        IN,
+        /** 用 {@link Tween#valueOut} 取值 —— 可见比例 = {@code easeOut(p)} */
+        OUT
+    }
+
     /**
      * 归一化进度。
      *
@@ -61,33 +69,35 @@ public record Tween(long startNanos, long durationNanos, Easing easing, float fr
      * <p>做法是**回拨起点**（把开始时间往前挪），而不是改曲线或改时长：
      * 这样新动画的其余部分与正常播放完全一致，观感上就是"从当前状态接着走"。
      *
-     * <p>反解用哪条式子由 {@code opening} 决定，**必须与调用方接下来怎么取值一致** ——
-     * 这两条式子不同，而且混用会得到一个"看着很合理"的错进度：
+     * <p><b>为什么必须显式声明 {@link Getter}</b>：可见值有两条式子，
+     * 而"接续"的定义是"接续前后用**同一个取值器**取出来是同一个数"：
      * <ul>
-     *   <li>{@code opening = true}（新动画是打开/进场，取值走 {@link #valueOut}）
-     *       → 反解 {@link Easing#progressForOut}</li>
-     *   <li>{@code opening = false}（新动画是关闭/退场，取值走 {@link #valueIn}）
-     *       → 反解 {@link Easing#progressForIn}</li>
+     *   <li>{@link #valueOut}：可见比例 = {@code 1 - easeIn(p)} ⇒ 反解 {@link Easing#progressForAlpha}</li>
+     *   <li>{@link #valueIn}：可见比例 = {@code easeIn(p)} ⇒ 反解 {@link Easing#progressForEaseIn}</li>
      * </ul>
-     * 这正是现有实现里 {@code solveProgress(..., closing)} 那个布尔参数的含义
-     * （`UiTransitions.java:183-184` 与 `:216-217` 分别对应 false / true）。
+     * 两者形状不同，混用会得到一个"看着合理"的错进度。
+     * 现有实现的 {@code solveProgress(..., closing)} 就是同一件事
+     * （`UiTransitions.java:183-184` 与 `:216-217` 各传一个方向）。
      *
-     * <p><b>{@code from}/{@code to}/{@code visible} 必须同域</b>：它内部做
-     * {@code (visible - from) / (to - from)}。把 alpha（0..1）配上像素域（0..120）
-     * 会静默得到错误的进度 —— 本轮踩过，所以 {@link #progress} 的语义固定为
-     * "这一趟淡变走完了多少"，而位移由 progress 驱动、不参与反解。
+     * <p>（本轮教训：先把这两个式子当成"同一个式子换元"而删掉了参数，
+     * 结果两支恒等、都走 progressForAlpha —— 看似简化，实则丢失了方向信息。
+     * 旧实现的布尔不是冗余，它编码的正是"调用方接下来用哪个取值器"。）
+     *
+     * <p><b>参数必须同域</b>：{@code from} / {@code to} / {@code visible} 三者同域
+     * （内部做 {@code (visible - from) / (to - from)}）。alpha 用 {@code [0,1]}；
+     * 位移由进度驱动、不参与反解。
      *
      * @param now           当前时间
-     * @param visible       当前可见值（现有实现传的是"可见透明度"）
+     * @param visible       当前可见值（alpha 域下即"可见透明度"）
      * @param durationNanos 新动画的时长
      * @param easing        新动画的曲线
      * @param from          新动画的起始值
      * @param to            新动画的结束值
-     * @param opening       新动画是否走缓出方向（打开/进场）
+     * @param getter        调用方接下来用哪个取值器取值
      * @return 起点已回拨的 {@code Tween}
      */
     public static Tween continueFrom(long now, float visible, long durationNanos, Easing easing,
-                                     float from, float to, boolean opening) {
+                                     float from, float to, Getter getter) {
         // 值域退化（from == to）时无法反解，按"从头播"处理，避免除以 0
         float span = to - from;
         if (span == 0.0F || Float.isNaN(span)) {
@@ -95,15 +105,14 @@ public record Tween(long startNanos, long durationNanos, Easing easing, float fr
         }
         float normalized = Easing.clamp01((visible - from) / span);
         Easing target = easing == null ? NamedEasing.LINEAR : easing;
-        // 用哪个反解原语，是**按调用方接下来怎么取可见比例**定的，两者都对得上同一批数值：
-        //   · opening=true  —— 取值走 valueOut；本方法按"可见比例 = 1 - easeIn(p)"归一化，
-        //     与该式同一形状 ⇒ 用 progressForIn
-        //   · opening=false —— 取值走 valueIn；反解的是 easeIn 的反函数 ⇒ 用 progressForOut
-        // 这一对映射由 MathLayerVerify 的接续断言**双向锁住**：
-        //   alpha 连续、位移同步、进度落点三条同时在两种打断方向上成立。
-        // （写反的表现：新旧值恰好互换 —— 旧算 0.3 的场合新算 0.7，反之亦然。
-        //  两者都是"看着合理的小数"，肉眼与真机都发现不了，只有断言能抓。）
-        float progress = opening ? target.progressForIn(normalized) : target.progressForOut(normalized);
+        // 归一化后：valueIn 的可见比例是 easeIn(p)，valueOut 的是 easeOut(p) = 1 - easeIn(1-p)。
+        // 所以按**取值器**选反解，与 from/to 的符号无关：
+        //   getter=OUT ⇒ 反解 easeOut(p) = target ⇒ 1 - easeIn(1-p) = target
+        //                ⇒ progressForAlpha(1 - target)
+        //   getter=IN  ⇒ 反解 easeIn(p) = target  ⇒ progressForEaseIn(target)
+        float progress = getter == Getter.OUT
+                ? target.progressForAlpha(1.0F - normalized)
+                : target.progressForEaseIn(normalized);
         long backdate = backdateNanos(progress, durationNanos);
         return new Tween(now - backdate, durationNanos, target, from, to);
     }

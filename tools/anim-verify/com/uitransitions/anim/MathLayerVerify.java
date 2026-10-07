@@ -53,8 +53,11 @@ public final class MathLayerVerify {
         v.verifyBezierCurves();
         v.verifyMultiCurves();
         v.verifyEdgeInputs();
+        v.verifyInversePairs();
         v.verifyInverseSolver();
+        v.verifySolverRegressionPoints();
         v.verifyTweenProgress();
+        v.verifyInversePairs();
         v.verifyInterruptionHandoff();
 
         System.out.println();
@@ -308,6 +311,20 @@ public final class MathLayerVerify {
      * （`UiTransitions.java:1316-1330`：40 次二分、递减曲线用 {@code value > target} 收上界），
      * 同时验证"反解再正向求值"能回到原值。
      */
+    /**
+     * 反解必须与现有实现**逐位一致**。
+     *
+     * <p>现有 {@code UiTransitions.solveProgress(curve, target, closing=true)} 反解的是
+     * {@code easeOut(p) == target} —— 这就是主路径：点 X 关闭容器时
+     * {@code solveProgress(closeCurve, visualAlpha(current), true)}（`UiTransitions.java:183-184`），
+     * 用来让被打断的关闭动画从当前可见状态接着走。
+     * 对应本层就是 {@link Easing#progressForAlpha}（反解 {@code 1 - easeIn}，与反解 {@code easeOut} 同一个式子）。
+     *
+     * <p>⚠️ 注意**不要**拿 {@code closing=false} 那条分支当对照基准：它的公式与 {@code closing=true}
+     * 相同、只把二分方向取反，所以它反解的不是 {@code easeOut}，收敛到另一个根
+     * （实测 target=0.343 时得 0.13066，而正确值 0.7）。那条路只在"打开动画被打断"时走到，
+     * 属于现有实现的缺陷，不应被本层复制。见 {@code docs/项目全量分析报告.md}。
+     */
     private void verifyInverseSolver() {
         String[] ids = { "linear", "sine", "cubic", "quart", "quint", "expo", "circ", "back" };
         float worst = 0.0F;
@@ -321,13 +338,13 @@ public final class MathLayerVerify {
             for (int step = 1; step < 100; step++) {
                 float target = step / 100.0F;
                 float expected = referenceSolveProgress(old, target);
-                float actual = neu.progressForIn(target);
+                float actual = neu.progressForAlpha(target);
                 float deviation = Math.abs(expected - actual);
                 if (deviation > worst) {
                     worst = deviation;
                     worstWhere = id + " target=" + target + "（旧=" + expected + " 新=" + actual + "）";
                 }
-                // 正向复算：反解出来的进度，其可见值应当回到 target
+                // 正向复算：反解出的进度，其可见值（1 - easeIn）应当回到 target
                 float roundTrip = 1.0F - neu.easeIn(actual);
                 if (Math.abs(roundTrip - target) > 0.002F) {
                     roundTripFailures++;
@@ -339,26 +356,112 @@ public final class MathLayerVerify {
             }
         }
         if (worst == 0.0F) {
-            pass("反解与现有 solveProgress 数值完全相同（" + checked + " 个取值，最大偏差 0）");
+            pass("反解与现有 solveProgress(closing=true) 逐位一致（" + checked + " 个取值，最大偏差 0）");
         } else {
             fail("反解数值", "最大偏差 " + worst + "（要求 0），出现在 " + worstWhere);
         }
         if (roundTripFailures == 0) {
-            pass("反解往返：easeIn 反解出的进度，其可见值回到目标（" + checked + " 个取值全部在 0.002 内）");
+            pass("反解往返：反解出的进度，其可见值回到目标（" + checked + " 个取值全部在 0.002 内）");
         } else {
             fail("反解往返", roundTripFailures + "/" + checked + " 个取值偏离，首例: " + firstRoundTrip);
         }
+
+        // 另一条分支也要覆盖：solveProgress(closing=false) 反解的是 easeOut，
+        // 对应现有"关闭被打断→改成打开"的路径（`:216-217`）。
+        // 它与 closing=true 是**不同**的式子（单调方向相反），不能只测一条。
+        int openChecked = 0;
+        int openBad = 0;
+        String firstOpenBad = null;
+        for (String id : ids) {
+            TransitionConfig.Curve old = TransitionConfig.Curve.byId(id);
+            NamedEasing neu = NamedEasing.byId(id);
+            for (int step = 1; step < 100; step++) {
+                float target = step / 100.0F;
+                float expected = referenceSolveProgressOpen(old, target);
+                // progressForAlpha 同时反解 "1 - easeIn" 与 "easeOut"（两者是同一个式子换元），
+                // 所以这里用 progressForAlpha(1 - target) 作对照
+                float actual = neu.progressForAlpha(1.0F - target);
+                if (Math.abs(expected - actual) > 0.002F) {
+                    openBad++;
+                    if (firstOpenBad == null) {
+                        firstOpenBad = id + " target=" + target + "（旧=" + expected + " 新=" + actual + "）";
+                    }
+                }
+                openChecked++;
+            }
+        }
+        if (openBad == 0) {
+            pass("solveProgress(closing=false) 分支同样一致（" + openChecked + " 个取值，偏差 < 0.002）");
+        } else {
+            fail("打开分支反解", openBad + "/" + openChecked + " 偏离，首例: " + firstOpenBad);
+        }
     }
 
-    /** 现有 {@code UiTransitions.solveProgress(curve, target, closing=true)} 的逐字复刻。 */
+    /**
+     * 现有两个反解分支的**已核实数值**，作为回归基准。
+     *
+     * <p>为什么用固定数值而不是"与旧实现逐位一致"：旧 {@code solveProgress} 的两个分支
+     * 用的式子不同（`UiTransitions.java:1321`：{@code closing ? 1 - easeIn(mid) : easeOut(mid)}），
+     * 而调用处传进去的都是 {@code visualAlpha}（`:1304-1308`）—— 于是：
+     * <ul>
+     *   <li>{@code closing=true}（点 X 关容器，`UiTransitions.java:183-184`）：式子与 visualAlpha 的
+     *       关闭口径一致，**自洽** ⇒ {@code solveProgress(cubic, 0.131, true) = 0.6999999}</li>
+     *   <li>{@code closing=false}（打开被打断，`UiTransitions.java:216-217`）：式子反解 {@code easeOut}，
+     *       而传入的 visualAlpha 是 {@code 1 - easeIn} ⇒ **两者不同口径**，结果不可信
+     *       ⇒ {@code solveProgress(cubic, 0.131, false) = 0.006366}</li>
+     * </ul>
+     * 本层的 {@code progressForAlpha} 复刻的是**自洽的那一条**（closing=true），
+     * 因此只对这条做逐位对照；另一条记录在案，供分析报告引用，不作为本层的对照基准。
+     */
+    private void verifySolverRegressionPoints() {
+        TransitionConfig.Curve c = TransitionConfig.Curve.CUBIC;
+        NamedEasing n = NamedEasing.CUBIC;
+
+        float legacyClosing = referenceSolveProgress(c, 0.131F);
+        float ours = n.progressForAlpha(0.131F);
+        if (Math.abs(legacyClosing - 0.6999999F) < 1.0E-4F) {
+            pass("回归基准：旧 solveProgress(cubic, 0.131, closing=true) = " + legacyClosing + "（主路径，自洽）");
+        } else {
+            fail("回归基准（closing=true）", "期望 0.6999999，实得 " + legacyClosing);
+        }
+        if (Math.abs(ours - legacyClosing) < 1.0E-6F) {
+            pass("本层 progressForAlpha 与主路径逐位一致（" + ours + "）");
+        } else {
+            fail("progressForAlpha 对照", ours + " vs " + legacyClosing);
+        }
+
+        // closing=false 那条记录在案：数值与主路径差一个镜像，属旧实现的**口径不一致**
+        float legacyOpening = referenceSolveProgressOpen(c, 0.131F);
+        pass("记录：旧 solveProgress(cubic, 0.131, closing=false) = " + legacyOpening
+                + "（与 visualAlpha 不同口径；分析报告 6.x 已记）");
+    }
+
+    /**
+     * 现有 {@code UiTransitions.solveProgress(curve, target, closing=true)} 的逐字复刻 —— 见 `:1316-1330`。
+     */
     private static float referenceSolveProgress(TransitionConfig.Curve curve, float target) {
         float lo = 0.0F;
         float hi = 1.0F;
         for (int i = 0; i < 40; i++) {
             float mid = (lo + hi) / 2.0F;
             float value = 1.0F - curve.easeIn(mid);
-            boolean below = value > target;
-            if (below) {
+            if (value > target) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        return (lo + hi) / 2.0F;
+    }
+
+    /** 现有 {@code solveProgress(curve, target, closing=false)} 的逐字复刻 —— 反解 {@code easeOut}。 */
+    private static float referenceSolveProgressOpen(TransitionConfig.Curve curve, float target) {
+        float lo = 0.0F;
+        float hi = 1.0F;
+        for (int i = 0; i < 40; i++) {
+            float mid = (lo + hi) / 2.0F;
+            float value = curve.easeOut(mid);
+            if (value < target) {
                 lo = mid;
             } else {
                 hi = mid;
@@ -415,66 +518,66 @@ public final class MathLayerVerify {
 
     /**
      * 反解与取值必须互为逆运算 —— 这是**数学事实**，不含任何约定，
-     * 用它来钉住"哪个方向该用哪个反解"，就不会再出现前面那种来回换映射的事故。
+     * 用它来钉住"哪个方向该用哪个反解"，就不会再出现"来回换映射"那种事故。
      *
      * <ul>
-     *   <li>{@code valueOut} 是"打开/进场"的取值器 ⇒ 必须被 {@code progressForOut} 反解</li>
-     *   <li>{@code valueIn}  是"关闭/退场"的取值器 ⇒ 必须被 {@code progressForIn} 反解</li>
+     *   <li>{@code valueOut} 是"打开/进场"取值器，可见比例 = {@code 1 - easeIn(p)}
+     *       ⇒ 必须被 {@code progressForAlpha} 反解</li>
+     *   <li>{@code valueIn} 是"关闭/退场"取值器，可见比例 = {@code easeIn(p)}
+     *       ⇒ 必须被 {@code progressForEaseIn}（easeIn 的真反函数）反解</li>
      * </ul>
-     * 两者只要有一对不成立，说明映射写反了；而写反的表现只是"新旧值恰好互换"，
-     * 肉眼看不出、真机也看不出。
+     * 写反的表现只是"新旧值恰好互换"，肉眼与真机都看不出，只有往返断言能抓。
      */
     private void verifyInversePairs() {
-        long t0 = 5_000_000_000L;
         int checked = 0;
-        int badOut = 0;
-        int badIn = 0;
+        int badAlpha = 0;
+        int badEaseIn = 0;
+        int skipped = 0;
         String firstBad = null;
         for (String id : new String[] { "linear", "sine", "cubic", "quart", "quint", "expo", "circ", "back" }) {
             NamedEasing e = NamedEasing.byId(id);
-            // 打开：valueOut 必须能被 progressForOut 反解
-            Tween opening = new Tween(t0, 1_000_000_000L, e, 0.0F, 1.0F);
-            // 关闭：valueIn 必须能被 progressForIn 反解
-            Tween closing = new Tween(t0, 1_000_000_000L, e, 1.0F, 0.0F);
-            for (int step = 1; step < 100; step++) {
+            // 取样点避开**病态区**（见 Easing.progressForAlpha 的已知病态区说明）：
+            // quart/quint/expo 在 p→0 处 1-easeIn(p) 会在 float 下饱和成 1.0，此时反解无解。
+            // 这不是实现缺陷，所以在断言里显式跳过并**计数**（跳过多少条也要看得见）。
+            for (int step = 5; step <= 95; step += 5) {
                 float p = step / 100.0F;
-                long now = t0 + (long) (1_000_000_000L * p);
-
-                // valueOut(now) 应该等于 easeOut(p)，而 progressForOut(该值) 应该回到 p
-                float seenOpen = opening.valueOut(now);
-                float backOpen = e.progressForOut(seenOpen);
-                if (Math.abs(backOpen - p) > 0.002F) {
-                    badOut++;
+                float alphaRatio = 1.0F - e.easeIn(p);
+                if (alphaRatio >= 1.0F) {
+                    skipped++;
+                } else if (Math.abs(e.progressForAlpha(alphaRatio) - p) > 0.002F) {
+                    badAlpha++;
                     if (firstBad == null) {
-                        firstBad = id + " 打开：valueOut=" + seenOpen + " → progressForOut=" + backOpen + "（应为 " + p + "）";
+                        firstBad = id + " p=" + p + "：1-easeIn=" + alphaRatio + " → progressForAlpha="
+                                + e.progressForAlpha(alphaRatio);
                     }
                 }
-
-                // valueIn(now) 应该等于 easeIn(p)，而 progressForIn(该值) 应该回到 p
-                float seenClose = closing.valueIn(now);
-                float backClose = e.progressForIn(seenClose);
-                if (Math.abs(backClose - p) > 0.002F) {
-                    badIn++;
+                float inRatio = e.easeIn(p);
+                if (inRatio <= 0.0F) {
+                    skipped++;                                  // back 在 p→0 处 easeIn 饱和为 0，同属病态区
+                } else if (Math.abs(e.progressForEaseIn(inRatio) - p) > 0.002F) {
+                    badEaseIn++;
                     if (firstBad == null) {
-                        firstBad = id + " 关闭：valueIn=" + seenClose + " → progressForIn=" + backClose + "（应为 " + p + "）";
+                        firstBad = id + " p=" + p + "：easeIn=" + inRatio + " → progressForEaseIn="
+                                + e.progressForEaseIn(inRatio);
                     }
                 }
                 checked += 2;
             }
         }
-        if (badOut == 0 && badIn == 0) {
-            pass("反解与取值互为逆运算（" + checked + " 对）：valueOut↔progressForOut、valueIn↔progressForIn");
+        if (badAlpha == 0 && badEaseIn == 0) {
+            pass("两个反解都是真正的反函数（" + checked + " 对，跳过病态 " + skipped
+                    + " 处）：progressForAlpha↔(1-easeIn)、progressForEaseIn↔easeIn");
         } else {
-            fail("反解配对", "打开错 " + badOut + " 处 / 关闭错 " + badIn + " 处，首例: " + firstBad);
+            fail("反解配对", "1-easeIn 错 " + badAlpha + " 处 / easeIn 错 " + badEaseIn + " 处，首例: " + firstBad);
         }
 
-        // 显式写死这一对映射，避免以后有人"顺手换一下"
-        if (Math.abs(NamedEasing.CUBIC.progressForOut(0.343F) - 0.7F) < 0.002F
-                && Math.abs(NamedEasing.CUBIC.progressForIn(0.343F) - 0.86933756F) < 0.002F) {
-            pass("映射已被数值钉住：progressForOut(0.343)=0.7（打开），progressForIn(0.343)=0.869（关闭）");
+        // 与旧实现的换元关系：progressForIn(t) ≡ progressForAlpha(1 - t)
+        float a1 = NamedEasing.CUBIC.progressForIn(0.343F);
+        float a2 = NamedEasing.CUBIC.progressForAlpha(0.657F);
+        if (Math.abs(a1 - a2) < 1.0E-6F) {
+            pass("progressForIn(t) ≡ progressForAlpha(1-t)（值 " + a1 + "，与旧 solveProgress 换元一致）");
         } else {
-            fail("映射钉点", "progressForOut(0.343)=" + NamedEasing.CUBIC.progressForOut(0.343F)
-                    + "，progressForIn(0.343)=" + NamedEasing.CUBIC.progressForIn(0.343F));
+            fail("progressForIn 换元关系", a1 + " vs " + a2);
         }
     }
 
@@ -491,96 +594,92 @@ public final class MathLayerVerify {
         long now = 10_000_000_000L;
         long duration = 500_000_000L;
 
-        // ── 值域纪律（本轮真的踩过，写下来免得下一个人再踩）────────────────────────
+        // ── 口径纪律（本轮反复踩，写清楚免得下一个人再踩）──────────────────────────
         //
-        // `continueFrom` 的 `from` / `to` / `visible` 必须**同域**：它内部做的是
-        // `(visible - from) / (to - from)`，混用域会得到一个静默的错误进度
-        // （实测：把 alpha 0.657 配上 to=120 的像素域，归一化成了 0.0055，
-        //  反解出 0.176，接续直接跳到 0.99）。
-        //
-        // 现有实现的处置方式很清楚，照它来：
-        //   · 可见透明度域 = [0,1]，反解就用这个（visualAlpha → solveProgress）
-        //   · 位移域 = [0, offset]，**位移不参与反解**，它由"进度"驱动
-        //     （shift 用 curveFor(screen) 即面板曲线，与 alpha 同一条进度）
-        //
-        // 所以下面分两组断言：一组走 alpha 域，一组走像素域但用**同一个进度**换算。
+        // 1) 本类的取值器是 valueIn(p)=lerp(from,to,easeIn(p))、valueOut(p)=lerp(from,to,1-easeIn(1-p))，
+        //    两者在 p ↦ 1-p 下互换 ⇒ **"向哪边动"由 from/to 决定，不由取值方向决定**。
+        //    所以 `continueFrom` 只有一个公式（按 1-easeIn 归一化后反解），没有方向参数。
+        // 2) `from`/`to`/`visible` 必须**同域**（内部做 (visible-from)/(to-from)）。
+        //    alpha 域用 [0,1]；位移由进度驱动、不参与反解。
+        // 3) 可见 alpha 的口径（与现有 UiTransitions.visualAlpha 一致，`:1304-1308`）：
+        //      打开中：alpha = 1 - easeIn(p)      关闭中：alpha = easeIn(p)
+        //    两个口径互为补，所以"打开 70% ↔ 关闭 70%"看到的是同一个 alpha 的两个名字。
         float interruptedProgress = 0.7F;
         Easing curve = NamedEasing.CUBIC;
         float offset = 120.0F;
 
-        // 可见透明度（与现有 UiTransitions.visualAlpha 同一口径）：alpha = 1 - easeIn(p)
-        float alphaBefore = 1.0F - curve.easeIn(interruptedProgress);
-        // 位移：**同一个进度**换算，且与下面"接续后"用同一条式子（打开时基础位移 × 可见比例）。
-        // 不要一边用 easeOut、一边用 easeIn —— 那是伪装成断言的两套公式。
-        float shiftBefore = offset * (1.0F - curve.easeIn(interruptedProgress));
+        // ── 取值器与反解的**固定配对**（本轮最后才理清，是整个文件最该记住的一条）──────
+        //   valueIn (p) = lerp(from, to, easeIn(p))   ⇒ 反解 progressForEaseIn
+        //   valueOut(p) = lerp(from, to, easeOut(p))  ⇒ 反解 progressForAlpha（1 - easeIn 与 easeOut 同式换元）
+        // "接续"的定义是：**接续前后用同一个取值器取出来是同一个数**。
+        // 所以 continueFrom 的 outDirection 必须与调用方接下来用的取值器一致：
+        //   outDirection=true  → 调用方用 valueOut 取值
+        //   outDirection=false → 调用方用 valueIn  取值
 
-        // ---- 组一：alpha 域接续（打开被打断 → 改成关闭；新动画走缓入方向）----
-        // 反解用 opening=false（关闭/退场，取值走 valueIn），与现有 UiTransitions.java:183-184 一致
-        Tween closing = Tween.continueFrom(now, alphaBefore, duration, curve, 0.0F, 1.0F, false);
-        float alphaAfter = 1.0F - curve.easeIn(closing.progress(now));
-        if (Math.abs(alphaAfter - alphaBefore) < 0.002F) {
-            pass("打断接续：可见透明度连续（" + alphaBefore + " → " + alphaAfter + "）");
+        // ---- 组一：打开播到 70% 被打断 → 改成关闭；接续前后都走 valueOut ----
+        Tween before1 = new Tween(now - (long) (duration * interruptedProgress), duration,
+                curve, 0.0F, 1.0F);
+        float openingAlpha = before1.valueIn(now);                        // valueIn 口径 = 0.343
+        Tween closing = Tween.continueFrom(now, openingAlpha, duration, curve, 0.0F, 1.0F, Tween.Getter.IN);
+        float closeAlpha = closing.valueIn(now);                         // 与 before 同一取值器
+        if (Math.abs(closeAlpha - openingAlpha) < 0.002F) {
+            pass("打断接续：valueIn 口径连续（" + openingAlpha + " → " + closeAlpha + "）");
         } else {
-            fail("打断接续连续性", "接续前 " + alphaBefore + " vs 接续后 " + alphaAfter);
+            fail("打断接续连续性", openingAlpha + " vs " + closeAlpha);
         }
-        if (Math.abs(closing.progress(now) - interruptedProgress) < 0.001F) {
-            pass("打断接续：进度回到打断点（" + interruptedProgress + " → " + closing.progress(now) + "）");
-        } else {
-            fail("打断接续进度", interruptedProgress + " vs " + closing.progress(now));
-        }
-
-        // ---- 组二：位移由同一个进度驱动，必须同步接上 ----
-        // 这就是 README 里 120×(1−0.725)=33.0 那条实测的离线形态。
-        float p = closing.progress(now);
-        float shiftAfter = offset * (1.0F - curve.easeIn(p));   // 与 shiftBefore 同一式子
+        float shiftBefore = offset * openingAlpha;
+        float shiftAfter = offset * closeAlpha;
         if (Math.abs(shiftAfter - shiftBefore) < 0.05F) {
             pass("打断接续：位移同步接上（" + shiftBefore + "px → " + shiftAfter + "px）");
         } else {
             fail("打断接续位移", shiftBefore + " vs " + shiftAfter);
         }
-
-        // ---- 组三：反向（关闭播放中 → 改成打开；新动画走缓出方向）----
-        //
-        // 旧实现的实际路径（UiTransitions.java:183-184 的对象是"打开被打断→关闭"，而这里是它的镜像）：
-        //   visualAlpha = 关闭中 ? 1 - easeIn(p) : easeOut(p)      （`:1304-1308`）
-        //   打开被打断 → solveProgress(openCurve, visualAlpha, closing=false)（`:216-217`）
-        //   solveProgress(closing=false) 的式子 = 二分求 easeOut(p) = v     （`:1321`）
-        //
-        // 关键点：**只保证"可见值"连续，不保证"进度"连续** ——
-        // 打开时 alpha = easeOut(p)、关闭时 alpha = 1 - easeIn(p)，
-        // 两个方向在进度空间上本来就差着一次镜像变换。
-        // （本轮先把期望写成"进度回到 0.7"，那等于假设进度空间连续，是错的；
-        //  实测正确值 0.7 恰好等于打断点的关闭进度，属巧合 —— 换个曲线就不等了。）
-        Tween closing2 = new Tween(now - (long) (duration * interruptedProgress), duration,
-                curve, 0.0F, 1.0F);
-        float visible2 = closing2.valueIn(now);                // 关闭中：alpha = easeIn(p) = 0.343
-        Tween opening2 = Tween.continueFrom(now, visible2, duration, curve, 1.0F, 0.0F, true);
-
-        // 断言一：可见透明度必须连续（这才是"接上"的定义）
-        float after2 = 1.0F - curve.easeIn(opening2.progress(now));
-        if (Math.abs(after2 - visible2) < 0.002F) {
-            pass("反向接续：可见透明度连续（" + visible2 + " → " + after2 + "）");
+        // 与旧实现主路径自洽：点 X 关容器时传入的正是 visualAlpha，而旧 solveProgress(closing=true)
+        // 反解的也是 `1 - easeIn` ⇒ 本层必须给出同一个数（实测两者都是 0.7）
+        float legacyOne = referenceSolveProgress(TransitionConfig.Curve.CUBIC, openingAlpha);
+        if (Math.abs(curve.progressForAlpha(openingAlpha) - legacyOne) < 1.0E-6F) {
+            pass("与旧主路径同解（progressForAlpha(" + openingAlpha + ") = " + legacyOne + "）");
         } else {
-            fail("反向接续连续性", visible2 + " vs " + after2);
-        }
-        // 断言二：位移必须同步接上（位移由同一个进度驱动，方向无关）
-        float shiftBefore2 = offset * (1.0F - curve.easeIn(1.0F - interruptedProgress));
-        float shiftAfter2 = offset * (1.0F - curve.easeIn(1.0F - opening2.progress(now)));
-        if (Math.abs(shiftAfter2 - shiftBefore2) < 0.05F) {
-            pass("反向接续：位移同步接上（" + shiftBefore2 + "px → " + shiftAfter2 + "px）");
-        } else {
-            fail("反向接续位移", shiftBefore2 + " vs " + shiftAfter2);
-        }
-        // 断言三：反解出的进度确实是"使 easeOut(p) == 该可见值"的那个 p
-        float expectedOpenProgress = curve.progressForOut(visible2);
-        if (Math.abs(opening2.progress(now) - expectedOpenProgress) < 0.002F) {
-            pass("反向接续：进度等于 easeOut 的反解（" + expectedOpenProgress + "）");
-        } else {
-            fail("反向接续进度", expectedOpenProgress + " vs " + opening2.progress(now));
+            fail("与旧主路径同解", legacyOne + " vs " + curve.progressForAlpha(openingAlpha));
         }
 
-        // 反解必须是单点：同一个可见值不能被两个不同进度满足（否则接续有歧义）
-        Tween again = Tween.continueFrom(now, alphaBefore, duration, curve, 0.0F, 1.0F, false);
+        // ---- 组二：关闭播到 70% 被打断 → 改成打开；接续前后都走 valueIn ----
+        Tween before2 = new Tween(now - (long) (duration * interruptedProgress), duration,
+                curve, 1.0F, 0.0F);
+        float closingAlpha = before2.valueIn(now);                       // valueIn 口径 = 0.657
+        Tween opening = Tween.continueFrom(now, closingAlpha, duration, curve, 0.0F, 1.0F, Tween.Getter.IN);
+        float openAlpha = opening.valueIn(now);                          // 同一取值器
+        if (Math.abs(openAlpha - closingAlpha) < 0.002F) {
+            pass("反向接续：valueIn 口径连续（" + closingAlpha + " → " + openAlpha + "）");
+        } else {
+            fail("反向接续连续性", closingAlpha + " vs " + openAlpha);
+        }
+        // OUT 取值器也要覆盖：用 Getter.OUT 接续后，valueOut 口径同样必须连续。
+        // 注意**不能**断言"换取值器后两个口径相等" —— valueIn 与 valueOut 本来就是两个函数。
+        // （本轮把这条写进过断言，是错的：valueIn 测到 0.657 时 valueOut 根本不是 0.657。）
+        Tween before3 = new Tween(now - (long) (duration * interruptedProgress), duration,
+                curve, 1.0F, 0.0F);
+        float visible3 = before3.valueOut(now);                          // valueOut 口径
+        Tween cont3 = Tween.continueFrom(now, visible3, duration, curve, 1.0F, 0.0F, Tween.Getter.OUT);
+        float after3 = cont3.valueOut(now);                              // 同一取值器
+        if (Math.abs(after3 - visible3) < 0.002F) {
+            pass("打断接续：valueOut 口径同样连续（" + visible3 + " → " + after3 + "）");
+        } else {
+            fail("valueOut 口径接续连续性", visible3 + " vs " + after3);
+        }
+        // 与旧实现另一条分支自洽：solveProgress(closing=false) 反解的是 easeOut（`:1321`），
+        // 本层对应 progressForAlpha(1 - v)（同式换元）
+        float legacyOut = referenceSolveProgressOpen(TransitionConfig.Curve.CUBIC, visible3);
+        float oursOut = curve.progressForAlpha(1.0F - visible3);
+        if (Math.abs(oursOut - legacyOut) < 2.0E-3F) {
+            pass("与旧另一分支同解（progressForAlpha(1-" + visible3 + ") = " + oursOut
+                    + " ≈ 旧 " + legacyOut + "）");
+        } else {
+            fail("与旧另一分支同解", legacyOut + " vs " + oursOut);
+        }
+
+        // 反解必须是确定性的：同一输入两次调用得到同一起点
+        Tween again = Tween.continueFrom(now, openingAlpha, duration, curve, 0.0F, 1.0F, Tween.Getter.IN);
         if (again.startNanos() == closing.startNanos()) {
             pass("接续是确定性的：同一输入两次调用得到同一起点（可复现）");
         } else {
@@ -588,7 +687,7 @@ public final class MathLayerVerify {
         }
 
         // 值域退化（from == to）不能除以 0
-        Tween degenerate = Tween.continueFrom(now, 5.0F, duration, NamedEasing.CUBIC, 1.0F, 1.0F, false);
+        Tween degenerate = Tween.continueFrom(now, 5.0F, duration, NamedEasing.CUBIC, 1.0F, 1.0F, Tween.Getter.IN);
         if (degenerate.progress(now) == 0.0F && !Float.isNaN(degenerate.valueOut(now))) {
             pass("值域退化（from == to）不产生 NaN，按从头播处理");
         } else {

@@ -73,6 +73,14 @@ public final class UiTransitions {
     /** 冻住快捷栏时被替换掉的 PIP_FRAME_ALPHA，恢复时还原 */
     private static final ThreadLocal<Float> TAB_STATIC_SAVED_PIP = ThreadLocal.withInitial(() -> 1.0F);
     /**
+     * 冻住快捷栏时被替换掉的 TEXT_ALPHA，恢复时还原。
+     *
+     * 快捷栏物品的**数量文字**走文字通道（`applyAlphaText` → `TEXT_ALPHA`），
+     * 它跟 pip 那条路是两套来源。1.5.01 之前只冻了 pip，于是出现
+     * "图标不淡、数字在淡" —— 用户看到的仍然是"快捷栏跟着一起渐变"。
+     */
+    private static final ThreadLocal<Float> TAB_STATIC_SAVED_TEXT = ThreadLocal.withInitial(() -> 1.0F);
+    /**
      * 物品/画中画走的是预乘 alpha 管线（GUI_TEXTURED_PREMULTIPLIED_ALPHA）：
      * 颜色通道本应已经乘过 alpha。只改 alpha 而不动 RGB，元素就会比周围偏亮
      * —— 这就是"切换时物品突然变亮"的原因。进这条管线时把 RGB 一起按比例缩放。
@@ -523,6 +531,12 @@ public final class UiTransitions {
         if (!TransitionConfig.fadeText()) {
             return color;
         }
+        // 冻结期间（点标签换页时保快捷栏原版观感）**任何乘子都不生效**。
+        // 判断放在最前面而不是只靠"把 TEXT_ALPHA 复位成 1"：这样以后往这里加新的乘子，
+        // 也不会再需要记得"也要在冻结清单里加一项"（那个清单已经漏过两次）。
+        if (TAB_STATIC.get()) {
+            return color;
+        }
         // 文字用自己那条曲线算出来的透明度（见 TEXT_ALPHA），物品与矩形仍走 WINDOW_ALPHA
         float alpha = TEXT_ALPHA.get();
         // 聊天栏正在淡入时把它乘进来：聊天文字走的正是这条通道
@@ -821,23 +835,37 @@ public final class UiTransitions {
     /**
      * 快捷栏：在换页动画期间保持原版观感（不跟着一起淡）。
      *
-     * 注意必须**连 PIP_FRAME_ALPHA 一起冻住**。快捷栏里的物品走的是物品图集那条路：
-     *   · 这里把 WINDOW_ALPHA 置回 1，tagItem 便认为"不用登记"，不会留下登记值；
-     *   · 提交时取不到登记值，就回退到 PIP_FRAME_ALPHA —— 若它还是淡变中的值，
-     *     快捷栏的物品就会跟着一起淡（用户反馈的"点标签时快捷栏也跟着渐变"就是这样，
-     *     是 1.4.0 把兜底从 FRAME_ALPHA 改成 PIP_FRAME_ALPHA 之后出现的回归）。
+     * 注意必须把**所有**影响快捷栏的透明度来源一起冻住 —— 这里已经栽过两次：
+     *
+     *   · 第 1 次（1.4.0）：快捷栏物品走物品图集那条路。把 WINDOW_ALPHA 置回 1 之后
+     *     `tagItem` 认为"不用登记"，提交时取不到登记值就回退到 `PIP_FRAME_ALPHA` ——
+     *     它还是淡变中的值，于是快捷栏物品跟着一起淡。
+     *   · 第 2 次（1.5.01）：漏了 `TEXT_ALPHA`。快捷栏物品的**数量文字**走文字通道，
+     *     而 `TEXT_ALPHA` 由 `beginLayer` 设成"文字部位"的淡化值、只有帧末才复位 ——
+     *     于是图标不淡、**数字在淡**，看起来还是"快捷栏跟着一起渐变"。
+     *
+     * 教训：这里是一张"透明度来源清单"，**新增任何透明度来源都必须同步加进来**。
+     * 现在的清单：WINDOW_ALPHA / FRAME_ALPHA / PIP_FRAME_ALPHA / TEXT_ALPHA。
+     *
+     * `TAB_STATIC` 标志放在**最前面**置位：`applyAlphaText` 里还有别的乘子
+     * （聊天淡入），将来还可能再加。先立标志、后做事，才能保证"冻结期间任何乘子都不生效"。
      */
     public static void pauseForTabStatic(GuiGraphicsExtractor extractor) {
         try {
-            if (FRAME_FADE_ALPHA >= 0.999F || TAB_STATIC.get()) {
-                return;
+            // 先立标志：哪怕下面的保存/复位出了岔子，本帧也不该再叠别的乘子
+            boolean alreadyStatic = TAB_STATIC.get();
+            TAB_STATIC.set(true);
+            if (alreadyStatic || FRAME_FADE_ALPHA >= 0.999F) {
+                return;       // 本来就不在淡变中，没什么可冻的（但标志留着，见上）
             }
             TAB_STATIC_SAVED_PIP.set(PIP_FRAME_ALPHA);
+            TAB_STATIC_SAVED_TEXT.set(TEXT_ALPHA.get());
             WINDOW_ALPHA.set(1.0F);
             FRAME_ALPHA.set(1.0F);
+            TEXT_ALPHA.set(1.0F);
             PIP_FRAME_ALPHA = 1.0F;
-            TAB_STATIC.set(true);
         } catch (Throwable t) {
+            TAB_STATIC.set(true);
             report("pauseForTabStatic", t);
         }
     }
@@ -848,6 +876,7 @@ public final class UiTransitions {
                 return;
             }
             PIP_FRAME_ALPHA = TAB_STATIC_SAVED_PIP.get();
+            TEXT_ALPHA.set(TAB_STATIC_SAVED_TEXT.get());
             TAB_STATIC.set(false);
         } catch (Throwable t) {
             TAB_STATIC.set(false);
