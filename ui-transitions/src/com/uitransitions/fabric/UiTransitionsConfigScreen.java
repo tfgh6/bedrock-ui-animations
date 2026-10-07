@@ -122,6 +122,15 @@ public final class UiTransitionsConfigScreen {
                 .setSaveConsumer(TransitionConfig::setCloseDurationMs)
                 .build());
 
+        anim.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.chat_fade"),
+                        TransitionConfig.chatFadeMs(),
+                        TransitionConfig.MIN_CHAT_FADE_MS, TransitionConfig.MAX_CHAT_FADE_MS)
+                .setDefaultValue(TransitionConfig.DEFAULT_CHAT_FADE_MS)
+                .setTooltip(Component.translatable("ui_transitions.config.chat_fade.tip1"),
+                        Component.translatable("ui_transitions.config.chat_fade.tip2"))
+                .setSaveConsumer(TransitionConfig::setChatFadeMs)
+                .build());
+
         anim.addEntry(entries.startStrField(
                         Component.translatable("ui_transitions.config.open_curve"), TransitionConfig.openCurve().id())
                 .setDefaultValue(TransitionConfig.Curve.CUBIC.id())

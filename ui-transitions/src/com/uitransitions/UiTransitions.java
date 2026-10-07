@@ -524,7 +524,12 @@ public final class UiTransitions {
             return color;
         }
         // 文字用自己那条曲线算出来的透明度（见 TEXT_ALPHA），物品与矩形仍走 WINDOW_ALPHA
-        return modulate(color, TEXT_ALPHA.get());
+        float alpha = TEXT_ALPHA.get();
+        // 聊天栏正在淡入时把它乘进来：聊天文字走的正是这条通道
+        if (chatFadeActive) {
+            alpha *= chatFadeAlpha();
+        }
+        return modulate(color, alpha);
     }
 
     private static int modulate(int color) {
@@ -935,6 +940,112 @@ public final class UiTransitions {
         }
     }
 
+    // ================================================================== 聊天栏淡入
+
+    /**
+     * 聊天栏"新消息淡入"的计时与状态。
+     *
+     * 用**挂钟时间**：26.3 没有现成的"当前 GUI tick"可读（`Gui` 上没有 getGuiTicks，
+     * `Line.addedTime()` 的基准也拿不到），而"这一块聊天上次变化是什么时候"
+     * 本身就是最直接的信号。
+     */
+    private static volatile long chatFadeStartNanos;
+    private static volatile boolean chatFadeActive;
+    /** 上一帧聊天的"指纹"：行数与文字内容，用来判断有没有新消息进来 */
+    private static volatile int chatLineCount = -1;
+    private static volatile int chatContentHash;
+
+    /**
+     * 聊天开始绘制（ChatFadeMixin 注入在 ChatComponent.extractRenderState 的 HEAD）。
+     *
+     * 这里判断"是不是有新消息"，然后决定这一帧的透明度走不走淡入。
+     */
+    public static void beginChatRender() {
+        try {
+            // **只在真的处于淡入窗口里才介入**：这个标志会被每次文字绘制读到（applyAlphaText），
+            // 常开就等于给整帧的文字都加一次多余的乘法。淡完了就关掉，回到零开销。
+            chatFadeActive = isChatFadeConfigured() && chatFadeStartNanos != 0L
+                    && System.nanoTime() - chatFadeStartNanos < chatFadeNanos();
+        } catch (Throwable t) {
+            chatFadeActive = false;
+            report("beginChatRender", t);
+        }
+    }
+
+    public static void endChatRender() {
+        // 不动 chatFadeActive：它由"是否还在淡入窗口里"决定，跨帧保持是刻意的
+    }
+
+    private static boolean isChatFadeConfigured() {
+        return TransitionConfig.enabled() && TransitionConfig.fade()
+                && TransitionConfig.chatFadeMs() > 0;
+    }
+
+    private static long chatFadeNanos() {
+        return TransitionConfig.chatFadeMs() * 1_000_000L;
+    }
+
+    /**
+     * 聊天栏新消息是不是正在淡入；是的话返回当前该乘的系数（否则恒为 1）。
+     *
+     * 计时由"聊天内容指纹变了"触发（见 {@link #noteChatContent}），
+     * 与"哪一帧在画聊天"无关 —— 这样即使聊天被挡住不画，淡入窗口也会自然走完。
+     */
+    public static float chatFadeAlpha() {
+        if (!chatFadeActive) {
+            return 1.0F;
+        }
+        try {
+            long start = chatFadeStartNanos;
+            if (start == 0L) {
+                return 1.0F;
+            }
+            long fadeNanos = chatFadeNanos();
+            long age = System.nanoTime() - start;
+            if (age >= fadeNanos) {
+                chatFadeActive = false;
+                return 1.0F;
+            }
+            float progress = age / (float) fadeNanos;
+            return TransitionConfig.curveForCategory(TransitionConfig.UiCategory.CHAT).easeOut(progress);
+        } catch (Throwable t) {
+            report("chatFadeAlpha", t);
+            chatFadeActive = false;
+            return 1.0F;
+        }
+    }
+
+    /**
+     * 记录当前聊天的"指纹"，变了就重新开始淡入。
+     *
+     * 指纹取"行数 + 内容哈希"：行数变了说明有新消息（或被删）；
+     * 内容哈希是为了覆盖"滚动、消息被替换"这些不改行数的情况 ——
+     * 宁可多淡一次，也不要"新消息直接蹦出来"。
+     */
+    public static void noteChatContent(int lines, int contentHash) {
+        try {
+            if (lines == chatLineCount && contentHash == chatContentHash) {
+                return;
+            }
+            chatLineCount = lines;
+            chatContentHash = contentHash;
+            if (isChatFadeConfigured()) {
+                chatFadeStartNanos = System.nanoTime();
+                chatFadeActive = true;
+            }
+        } catch (Throwable t) {
+            report("noteChatContent", t);
+        }
+    }
+
+    /** 换世界/重载界面时复位，避免拿着上一局的计时继续算 */
+    public static void resetChatFade() {
+        chatLineCount = -1;
+        chatContentHash = 0;
+        chatFadeStartNanos = 0L;
+        chatFadeActive = false;
+    }
+
     // ================================================================== 判定与计算
 
     public static boolean shouldAnimate(Screen screen) {
@@ -1174,9 +1285,19 @@ public final class UiTransitions {
         return curveFor(screen, TransitionConfig.Part.PANEL);
     }
 
-    /** 按部位取曲线：部位没单独配就自动回退到全局的渐入/渐出曲线 */
+    /** 按部位取曲线：部位没单独配就回退到"该界面所属分类"的曲线（再回退到全局） */
     private static TransitionConfig.Curve curveFor(Screen screen, TransitionConfig.Part part) {
-        return TransitionConfig.curveFor(part, CLOSING.containsKey(screen));
+        boolean closing = CLOSING.containsKey(screen);
+        String id = TransitionConfig.partCurveId(part, closing);
+        // 部位没单独配：优先用这一**类界面**的曲线，仍没配就回退全局（curveFor 内部会处理）
+        if (part != null && TransitionConfig.Curve.FOLLOW_ID.equals(id) && screen != null) {
+            TransitionConfig.UiCategory category = categoryOf(screen);
+            if (!TransitionConfig.Curve.FOLLOW_ID.equals(
+                    TransitionConfig.categoryCurveId(category))) {
+                return TransitionConfig.curveForCategory(category);
+            }
+        }
+        return TransitionConfig.curveFor(part, closing);
     }
 
     /** 当前"可见透明度"（关闭中递减、打开中递增），用于打断时接续 */
@@ -1359,6 +1480,18 @@ public final class UiTransitions {
     }
 
     /**
+     * 某个界面属于哪一类（聊天栏 / 创造物品栏 / 游戏菜单 / 容器 / 传送门 / 其它）。
+     *
+     * 分类决定"这一类界面用哪条曲线、多长时长"；没单独配过的分类会自动跟随全局，
+     * 所以老配置的行为完全不变。
+     */
+    private static TransitionConfig.UiCategory categoryOf(Screen screen) {
+        return screen == null
+                ? TransitionConfig.UiCategory.OTHER
+                : TransitionConfig.UiCategory.of(screen.getClass().getName());
+    }
+
+    /**
      * 渐入（打开）这一段动画的时长（纳秒）。
      *
      * 用 TransitionConfig 的上下限常量，而不是在这里另外写死一组数字 ——
@@ -1369,7 +1502,7 @@ public final class UiTransitions {
         if (isPortalLoading(screen)) {
             return millisToNanos(TransitionConfig.portalDurationMs(), durationFallback());
         }
-        return millisToNanos(TransitionConfig.openDurationMs(), durationFallback());
+        return millisToNanos(TransitionConfig.openDurationFor(categoryOf(screen)), durationFallback());
     }
 
     /** 渐出（关闭）这一段动画的时长（纳秒） */
@@ -1377,7 +1510,7 @@ public final class UiTransitions {
         if (isPortalLoading(screen)) {
             return millisToNanos(TransitionConfig.portalDurationMs(), durationFallback());
         }
-        return millisToNanos(TransitionConfig.closeDurationMs(), durationFallback());
+        return millisToNanos(TransitionConfig.closeDurationFor(categoryOf(screen)), durationFallback());
     }
 
     private static int durationFallback() {

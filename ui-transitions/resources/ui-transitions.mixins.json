@@ -18,7 +18,9 @@
     "SlotFadeMixin",
     "HotbarTabExcludeMixin",
     "HudSubtitleMixin",
-    "HudVeilMixin"
+    "HudVeilMixin",
+    "ChatFadeMixin",
+    "ChatFadeNoteMixin"
   ],
   "injectors": {
     "defaultRequire": 0

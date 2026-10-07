@@ -68,6 +68,30 @@ public final class TransitionConfig {
         save();
     }
 
+    // ---------------------------------------------------------------- 聊天栏淡入
+
+    /**
+     * HUD 聊天栏新消息的淡入时长（毫秒）。
+     *
+     * 这是一个**全新的动画**（以前聊天消息是"啪"地直接出现）：它发生在 HUD 上，
+     * 与"哪个界面在开/关"无关，所以单独一条配置、单独计时。
+     * 0 = 关闭（回到原版观感）。
+     */
+    public static final int DEFAULT_CHAT_FADE_MS = 260;
+    public static final int MIN_CHAT_FADE_MS = 0;
+    public static final int MAX_CHAT_FADE_MS = 2000;
+
+    private static volatile int chatFadeMs = DEFAULT_CHAT_FADE_MS;
+
+    public static int chatFadeMs() {
+        return chatFadeMs;
+    }
+
+    public static synchronized void setChatFadeMs(int value) {
+        chatFadeMs = Math.max(MIN_CHAT_FADE_MS, Math.min(MAX_CHAT_FADE_MS, value));
+        save();
+    }
+
     /** 原地淡变（点分类标签 / 滚动）的默认时长与范围 */
     public static final int DEFAULT_TAB_SWITCH_MS = 600;
     public static final int MIN_TAB_SWITCH_MS = 50;
@@ -688,6 +712,16 @@ public final class TransitionConfig {
                 partMap(closing, true).put(part, isValidBezier(pts) ? pts : DEFAULT_CUSTOM_BEZIER);
             }
         }
+        // 按界面分类的曲线与时长：没写过就保持"跟随全局"
+        resetCategories();
+        for (UiCategory category : UiCategory.values()) {
+            setCategoryInternal(category,
+                    properties.getProperty("categoryCurve." + category.id(), Curve.FOLLOW_ID),
+                    properties.getProperty("categoryCurveCustom." + category.id(), ""),
+                    readOptionalInt(properties, "categoryOpenMs." + category.id()),
+                    readOptionalInt(properties, "categoryCloseMs." + category.id()));
+        }
+        setChatFadeMsInternal(readInt(properties, "chatFadeMs", chatFadeMs));
         setOpenCurveCustomInternal(properties.getProperty("openCurveCustom", legacyCustom));
         setCloseCurveCustomInternal(properties.getProperty("closeCurveCustom", legacyCustom));
         rebuildSets();
@@ -732,6 +766,24 @@ public final class TransitionConfig {
                 }
             }
         }
+        // 只写"不跟随全局"的分类，理由同上面按部位的曲线
+        for (UiCategory category : UiCategory.values()) {
+            String id = categoryCurveId(category);
+            if (!Curve.FOLLOW_ID.equals(id)) {
+                properties.setProperty("categoryCurve." + category.id(), id);
+                properties.setProperty("categoryCurveCustom." + category.id(),
+                        CATEGORY_CUSTOM.getOrDefault(category, DEFAULT_CUSTOM_BEZIER));
+            }
+            Integer openMs = CATEGORY_OPEN_MS.get(category);
+            if (openMs != null) {
+                properties.setProperty("categoryOpenMs." + category.id(), Integer.toString(openMs));
+            }
+            Integer closeMs = CATEGORY_CLOSE_MS.get(category);
+            if (closeMs != null) {
+                properties.setProperty("categoryCloseMs." + category.id(), Integer.toString(closeMs));
+            }
+        }
+        properties.setProperty("chatFadeMs", Integer.toString(chatFadeMs));
         properties.setProperty("portalDurationMs", Integer.toString(portalDurationMs));
         properties.setProperty("fade", Boolean.toString(fade));
         properties.setProperty("fadeDim", Boolean.toString(fadeDim));
@@ -805,6 +857,8 @@ public final class TransitionConfig {
         scrollFadeBand = 200;
         scrollFadeMin = 0;
         portalDurationMs = DEFAULT_PORTAL_DURATION_MS;
+        setChatFadeMsInternal(DEFAULT_CHAT_FADE_MS);
+        resetCategories();
         setExcludedScreensInternal("");
         setExtraScreensInternal(DEFAULT_EXTRA_SCREENS);
         curveId = Curve.CUBIC.id();
@@ -1026,6 +1080,184 @@ public final class TransitionConfig {
             return closing ? closeCurve() : openCurve();
         }
         return resolveCurve(id, partCurveCustom(part, closing));
+    }
+
+    // ================================================================== 界面分类
+    //
+    // 「部位」切的是**一屏之内**的各个图层（底板/物品/文字…），
+    // 「界面分类」切的是**哪一类界面**（聊天栏 / 创造物品栏 / 游戏菜单 / 容器 / 传送门）。
+    // 两者正交：分类决定"这一类界面用哪条曲线、多长时长"，部位决定"这一屏里的某一层怎么淡"。
+
+    /** 界面分类。顺序即配置界面里选项卡的顺序。 */
+    public enum UiCategory {
+        CHAT("chat", "ui_transitions.category.chat"),
+        CREATIVE("creative", "ui_transitions.category.creative"),
+        GAME_MENU("game_menu", "ui_transitions.category.game_menu"),
+        CONTAINER("container", "ui_transitions.category.container"),
+        PORTAL("portal", "ui_transitions.category.portal"),
+        OTHER("other", "ui_transitions.category.other");
+
+        private final String id;
+        private final String labelKey;
+
+        UiCategory(String id, String labelKey) {
+            this.id = id;
+            this.labelKey = labelKey;
+        }
+
+        public String id() {
+            return this.id;
+        }
+
+        /** 翻译键（配置界面选项卡标题用） */
+        public String labelKey() {
+            return this.labelKey;
+        }
+
+        /**
+         * 这个界面属于哪一类。按**类名**判断，不 import 具体界面类 ——
+         * 这样以后原版改包名/加新界面时，最多是"归到 other"，不会编译不过。
+         */
+        public static UiCategory of(String className) {
+            if (className == null) {
+                return OTHER;
+            }
+            // 聊天栏：聊天输入框（HUD 上的聊天消息是另一条路，见 chatAlphaForLine）
+            if (className.contains("ChatScreen")) {
+                return CHAT;
+            }
+            if (className.contains("CreativeModeInventory")) {
+                return CREATIVE;
+            }
+            if (className.contains("PauseScreen")) {
+                return GAME_MENU;
+            }
+            if (className.contains("LevelLoading") || className.contains("ReceivingLevel")) {
+                return PORTAL;
+            }
+            if (className.contains("ContainerScreen") || className.contains("InventoryScreen")
+                    || className.contains("ChestScreen") || className.contains("FurnaceScreen")
+                    || className.contains("CraftingScreen") || className.contains("HopperScreen")
+                    || className.contains("ShulkerBoxScreen") || className.contains("DispenserScreen")
+                    || className.contains("BrewingStandScreen") || className.contains("MerchantScreen")
+                    || className.contains("AnvilScreen") || className.contains("BeaconScreen")
+                    || className.contains("EnchantmentScreen") || className.contains("GrindstoneScreen")
+                    || className.contains("LoomScreen") || className.contains("SmithingScreen")
+                    || className.contains("StonecutterScreen") || className.contains("CartographyScreen")) {
+                return CONTAINER;
+            }
+            return OTHER;
+        }
+    }
+
+    /** 按分类存的曲线 id；没设过就跟随全局 */
+    private static final java.util.Map<UiCategory, String> CATEGORY_CURVE =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(UiCategory.class));
+    private static final java.util.Map<UiCategory, String> CATEGORY_CUSTOM =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(UiCategory.class));
+    private static final java.util.Map<UiCategory, Integer> CATEGORY_OPEN_MS =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(UiCategory.class));
+    private static final java.util.Map<UiCategory, Integer> CATEGORY_CLOSE_MS =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(UiCategory.class));
+
+    /** 这一分类配的是哪条曲线（可能是 FOLLOW_ID = 跟随全局） */
+    public static String categoryCurveId(UiCategory category) {
+        return CATEGORY_CURVE.getOrDefault(category, Curve.FOLLOW_ID);
+    }
+
+    /** 这一分类实际要用的曲线：没单独配就回退到全局 */
+    public static Curve curveForCategory(UiCategory category) {
+        if (category == null) {
+            return openCurve();
+        }
+        String id = CATEGORY_CURVE.getOrDefault(category, Curve.FOLLOW_ID);
+        if (Curve.FOLLOW_ID.equals(id)) {
+            return openCurve();
+        }
+        return resolveCurve(id, CATEGORY_CUSTOM.getOrDefault(category, DEFAULT_CUSTOM_BEZIER));
+    }
+
+    /** 某一分类的渐入时长（毫秒）；没单独设过就跟随全局 */
+    public static int openDurationFor(UiCategory category) {
+        Integer value = category == null ? null : CATEGORY_OPEN_MS.get(category);
+        return value == null ? openDurationMs : value;
+    }
+
+    /** 某一分类的渐出时长（毫秒）；没单独设过就跟随全局 */
+    public static int closeDurationFor(UiCategory category) {
+        Integer value = category == null ? null : CATEGORY_CLOSE_MS.get(category);
+        return value == null ? closeDurationMs : value;
+    }
+
+    /**
+     * 这一分类有没有单独设过时长。
+     * 界面上要显示"跟随全局（480ms）"还是"单独设置（700ms）"，靠它区分 ——
+     * 光看数值分不出来（单独设成和全局一样也是合法的）。
+     */
+    public static boolean hasOwnDuration(UiCategory category, boolean closing) {
+        java.util.Map<UiCategory, Integer> map = closing ? CATEGORY_CLOSE_MS : CATEGORY_OPEN_MS;
+        return category != null && map.containsKey(category);
+    }
+
+    public static synchronized void setCategoryCurve(UiCategory category, String id) {
+        if (category == null) {
+            return;
+        }
+        String clean = id == null ? Curve.FOLLOW_ID : id.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!Curve.FOLLOW_ID.equals(clean) && !Curve.MULTI_ID.equals(clean)
+                && !Curve.byId(clean).id().equals(clean)) {
+            clean = Curve.FOLLOW_ID;
+        }
+        CATEGORY_CURVE.put(category, clean);
+        save();
+    }
+
+    /** 设置分类的自定义形状（贝塞尔或多点，类型按值的格式推断） */
+    public static synchronized void setCategoryCurveCustom(UiCategory category, String points) {
+        if (category == null || !isValidBezier(points)) {
+            return;
+        }
+        CATEGORY_CUSTOM.put(category, points);
+        CATEGORY_CURVE.put(category, kindForPoints(points));
+        save();
+    }
+
+    /** 把这一分类的时长单独设成 value；value <= 0 表示"回到跟随全局" */
+    public static synchronized void setCategoryDuration(UiCategory category, boolean closing, int value) {
+        if (category == null) {
+            return;
+        }
+        java.util.Map<UiCategory, Integer> map = closing ? CATEGORY_CLOSE_MS : CATEGORY_OPEN_MS;
+        if (value <= 0) {
+            map.remove(category);
+        } else {
+            map.put(category, clampDuration(value));
+        }
+        save();
+    }
+
+    /** 全部回到"跟随全局"（读配置与重置时用） */
+    private static void resetCategories() {
+        for (java.util.Map<?, ?> m : java.util.List.of(
+                CATEGORY_CURVE, CATEGORY_CUSTOM, CATEGORY_OPEN_MS, CATEGORY_CLOSE_MS)) {
+            m.clear();
+        }
+    }
+
+    private static void setCategoryInternal(UiCategory category, String curveId, String custom,
+                                            Integer openMs, Integer closeMs) {
+        if (curveId != null && !Curve.FOLLOW_ID.equals(curveId)) {
+            CATEGORY_CURVE.put(category, curveId);
+        }
+        if (custom != null && !custom.isBlank()) {
+            CATEGORY_CUSTOM.put(category, custom);
+        }
+        if (openMs != null) {
+            CATEGORY_OPEN_MS.put(category, openMs);
+        }
+        if (closeMs != null) {
+            CATEGORY_CLOSE_MS.put(category, closeMs);
+        }
     }
 
     public static synchronized void setPartCurve(Part part, boolean closing, String id) {
@@ -1568,6 +1800,29 @@ public final class TransitionConfig {
 
     private static int clampTabMs(int value) {
         return Math.max(MIN_TAB_SWITCH_MS, Math.min(MAX_TAB_SWITCH_MS, value));
+    }
+
+    /** 只写字段不存盘：给 load()/reset 用 */
+    private static void setChatFadeMsInternal(int value) {
+        chatFadeMs = Math.max(MIN_CHAT_FADE_MS, Math.min(MAX_CHAT_FADE_MS, value));
+    }
+
+    /**
+     * 读一个"可以不写"的整数键：**没写就返回 null**，而不是回退到某个默认值。
+     *
+     * 这是"跟随全局"能成立的关键：分类时长必须能区分"没配过"与"配成了和全局一样"，
+     * 用 `readInt(..., 默认值)` 会把两者压成同一个值，界面上就永远显示不出"跟随全局"。
+     */
+    private static Integer readOptionalInt(Properties properties, String key) {
+        String raw = properties.getProperty(key);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return clampDuration(Integer.parseInt(raw.trim()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static float clampJelly(float value) {
