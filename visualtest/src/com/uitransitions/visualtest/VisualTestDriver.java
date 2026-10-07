@@ -196,8 +196,12 @@ public final class VisualTestDriver {
             openCurveEditor(minecraft, "OPEN");
             sleep(1800);
             probeCurveEditorLayout(minecraft);
-            interactWithCurveEditor(minecraft);
-            sleep(600);
+            // **分步做，而且"点击在渲染线程、等待在驱动线程"**：
+            // 整段塞进一个 execute 里会把渲染线程堵住，界面状态（控件重建）就永远不推进。
+            interactWithCurveEditorSetup(minecraft);   // 渲染线程：点列表 / 切部位 / 切模式
+            sleep(2500);                               // 驱动线程：放帧过去
+            interactWithCurveEditorPoints(minecraft);  // 渲染线程：加点 / 移动 / 删点
+            sleep(1500);
             capture(minecraft, outDir, "curveui_after", System.nanoTime(), 0);
             closeScreen(minecraft);
             sleep(1200);
@@ -926,9 +930,44 @@ public final class VisualTestDriver {
         return null;
     }
 
-    /** 反射读字段，读不到就返回 "?"（诊断用，不要因为一个字段让整条日志挂掉） */
-    private static Object readFieldQuietly(Object target, String name) {
+    /** 把 children() 里每个控件的消息原样拼成一行（不做任何过滤，避免"我没看到"变成"不存在"） */
+    private static String describeChildren(Object screen) {
         try {
+            java.util.List<?> children =
+                    (java.util.List<?>) screen.getClass().getMethod("children").invoke(screen);
+            if (children == null) {
+                return "children()=null";
+            }
+            StringBuilder sb = new StringBuilder("[" + children.size() + "] ");
+            for (Object child : children) {
+                String message = "?";
+                try {
+                    Object value = child.getClass().getMethod("getMessage").invoke(child);
+                    message = String.valueOf(value);
+                } catch (Throwable ignored) {
+                    // 没消息
+                }
+                sb.append(child.getClass().getSimpleName()).append('=').append(message).append(" | ");
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "读取失败: " + t;
+        }
+    }
+
+    /** 界面当前有多少个控件（用来判断 init() 是否已经跑完 —— setScreen 只是排队） */
+    private static int childrenCount(Object screen) {
+        try {
+            java.util.List<?> children =
+                    (java.util.List<?>) screen.getClass().getMethod("children").invoke(screen);
+            return children == null ? 0 : children.size();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** 反射读字段，读不到就返回 "?"（诊断用，不要因为一个字段让整条日志挂掉） */
+    private static Object readFieldQuietly(Object target, String name) {        try {
             Class<?> type = target.getClass();
             while (type != null) {
                 try {
@@ -1115,8 +1154,13 @@ public final class VisualTestDriver {
         });
     }
 
-    /** 真的往曲线编辑器上派发点击，并核对"点完的状态对不对" */
-    private static void interactWithCurveEditor(Minecraft minecraft) {
+    /**
+     * 交互第一步：核对布局、点动画列表换编辑对象、切「跟随/单独设置」、切模式按钮。
+     *
+     * **只在渲染线程做"点"这件事**，等状态变化的活交给驱动线程做 ——
+     * 在渲染线程里 sleep 等控件重建，等于把渲染线程堵死，它永远等不到自己渲染的那一帧。
+     */
+    private static void interactWithCurveEditorSetup(Minecraft minecraft) {
         minecraft.execute(() -> {
             try {
                 Screen screen = minecraft.gui.screen();
@@ -1124,6 +1168,16 @@ public final class VisualTestDriver {
                     log("交互检查：当前不是曲线编辑器，跳过");
                     return;
                 }
+                // **等界面初始化完成再动它**：`setScreen` 只是排队，init() 要等下一帧才跑。
+                // 早于它去点，控件树是空的（0 个控件），点谁都没反应 ——
+                // 这一轮就被它误导了很久：日志看着像"按钮回调坏了"，其实按钮还没建出来。
+                for (int attempt = 0; attempt < 60; attempt++) {
+                    if (childrenCount(screen) >= 4) {
+                        break;
+                    }
+                    sleep(100);
+                }
+                log("控件树就绪：控件数=" + childrenCount(screen));
                 int graphX = readIntField(screen, "graphX");
                 int graphY = readIntField(screen, "graphY");
                 int graphSize = readIntField(screen, "graphSize");
@@ -1200,30 +1254,94 @@ public final class VisualTestDriver {
                 // ③ 切到多点模式：按钮位置从字段算出来，不猜坐标
                 log("切模式前：own=" + readObjectField(screen, "own")
                         + " multiMode=" + readObjectField(screen, "multiMode"));
-                if (!clickCurveModeButton(screen)) {
-                    return;     // 按钮点不了（不可编辑等）：后面的加点/删点没有意义
-                }
-                sleep(400);
-                Object multiMode = readObjectField(screen, "multiMode");
-                log("模式切换后 multiMode=" + multiMode
-                        + (Boolean.valueOf(true).equals(multiMode) ? "  ✅" : "  ❌（预期 true）"));
-                if (!Boolean.valueOf(true).equals(multiMode)) {
-                    log("多点模式没切过去，跳过加点/删点检查");
+                boolean clicked = clickCurveModeButton(screen);
+                // 等待必须在**驱动线程**上做。这个 lambda 本身跑在渲染线程里，
+                // 在这里 sleep 等"控件重建"等于把渲染线程堵死 —— 它永远等不到自己渲染的那一帧
+                // （实测：16 秒里一帧都没跑，看起来就像"按钮永远建不出来"）。
+                if (!clicked || !awaitMultiMode(screen)) {
+                    log("❌ 多点模式没切过去，跳过加点/删点检查");
                     return;
                 }
+                log("模式切换后 multiMode=true  ✅");
+            } catch (Throwable t) {
+                log("交互检查(第一步)失败: " + t);
+            }
+        });
+    }
 
+    /**
+     * 交互第二步：加点 / 点选式移动 / Delete 删点。
+     *
+     * 与第一步之间留出帧时间（由驱动线程等），因为模式切换后控件要重建。
+     */
+    private static void interactWithCurveEditorPoints(Minecraft minecraft) {
+        minecraft.execute(() -> {
+            try {
+                Screen screen = minecraft.gui.screen();
+                if (screen == null || !screen.getClass().getSimpleName().contains("CurveScreen")) {
+                    log("交互检查：当前不是曲线编辑器，跳过");
+                    return;
+                }
+                if (!Boolean.TRUE.equals(readObjectField(screen, "multiMode"))) {
+                    log("❌ 还没进多点模式，跳过加点/移动/删点检查：multiMode="
+                            + readObjectField(screen, "multiMode")
+                            + " moveMode=" + readObjectField(screen, "moveMode"));
+                    return;
+                }
+                int graphX = readIntField(screen, "graphX");
+                int graphY = readIntField(screen, "graphY");
+                int graphSize = readIntField(screen, "graphSize");
+                int listX = readIntField(screen, "listX");
+                int listY = readIntField(screen, "listY");
+                int listWidth = readIntField(screen, "listWidth");
                 // ④ 在图上点一下 → 应当加一个点。
                 //
                 // 先把中间点清空再点：上局跑完时曲线已经被拖过、图上有 5 个中间点，
                 // 随手点的位置可能正好"离已有点太近"而被合理地拒绝 ——
                 // 那不是 bug，却会让这个检查红掉（第一版就是这么误报的）。
                 // 清空之后点在哪个 x 上都该成功。
+                //
+                // **必须显式回到"加点"模式**：加点和移动共用"点一下"这个手势，
+                // 前面测模式按钮时可能已经停在移动模式了 —— 那时光标落在空白处会被
+                // 解释成"把选中的点挪过来"，而不是加点（这一轮就是这么误报的）。
                 writeObjectField(screen, "multi", new float[0]);
+                writeObjectField(screen, "selectedPoint", -1);
+                writeObjectField(screen, "moveMode", false);
+                sleep(300);
+                log("加点前状态：moveMode=" + readObjectField(screen, "moveMode")
+                        + " multiMode=" + readObjectField(screen, "multiMode"));
                 int beforePoints = countMulti(screen);
                 click(screen, graphX + graphSize * 0.35, graphY + graphSize * 0.6);
                 int afterPoints = countMulti(screen);
-                log("清空后在图中央点一下：点数 " + beforePoints + " -> " + afterPoints
+                log("加点模式：点空白处 " + beforePoints + " -> " + afterPoints
                         + (afterPoints == beforePoints + 1 ? "  ✅" : "  ❌（预期 +1）"));
+
+                // ④-b **不依赖拖动**的移动：切到「移动」模式后点别处，选中的点应当被挪过去。
+                // 这条是这一轮新增的能力，也是手机上唯一可靠的那条路，必须实测。
+                Object selectedBefore = readObjectField(screen, "selectedPoint");
+                clickCurveActionButton(screen);
+                // 等"移动模式"真正生效再往下走：这台机器一帧能到一秒，短 sleep 不可靠
+                awaitFlag(screen, "moveMode", true);
+                Object moveMode = readObjectField(screen, "moveMode");
+                log("切到移动模式：moveMode=" + moveMode
+                        + (Boolean.valueOf(true).equals(moveMode) ? "  ✅" : "  ❌（预期 true）"));
+                if (Boolean.valueOf(true).equals(moveMode) && selectedBefore instanceof Integer
+                        && (Integer) selectedBefore >= 0) {
+                    float[] beforeMove = (float[]) readObjectField(screen, "multi");
+                    float oldX = beforeMove[0];
+                    // 点到图右侧：选中的点应当被移过去，点数不变
+                    click(screen, graphX + graphSize * 0.7, graphY + graphSize * 0.4);
+                    float[] afterMove = (float[]) readObjectField(screen, "multi");
+                    boolean moved = afterMove.length == beforeMove.length
+                            && Math.abs(afterMove[0] - oldX) > 0.05F;
+                    log(String.format("移动模式：点选式移动 x %.2f -> %.2f 点数 %d->%d %s",
+                            oldX, afterMove[0], beforeMove.length / 2, afterMove.length / 2,
+                            moved ? "  ✅" : "  ❌（点没被挪过去，或点数变了）"));
+                } else {
+                    log("❌ 没有选中点，无法测点选式移动（selectedPoint=" + selectedBefore + "）");
+                }
+                clickCurveActionButton(screen);     // 切回加点模式，别影响后面的删点检查
+                sleep(250);
 
                 // ⑤ 滚轮翻列表（装得下时"没得翻"也算正常，只记录）
                 Object scrollTop = readObjectField(screen, "listScroll");
@@ -1232,19 +1350,22 @@ public final class VisualTestDriver {
                         + readObjectField(screen, "listScroll"));
 
                 // ⑥ Delete 删点（先让鼠标"停在点上"：mouseMoved 会更新 lastMouseX/Y）
-                screen.mouseMoved(graphX + graphSize * 0.35, graphY + graphSize * 0.6);
+                // **必须按当前实际坐标定位**：上一步刚把点移到 0.70，若还拿 0.35 去指，
+                // 那里已经没有点了 —— Delete 找不到目标，看起来像"删不掉"。
+                float[] nowPoints = (float[]) readObjectField(screen, "multi");
+                double pointX = nowPoints.length >= 2 ? nowPoints[0] : 0.5F;
+                double pointY = nowPoints.length >= 2 ? nowPoints[1] : 0.5F;
+                double px = graphX + graphSize * pointX;
+                double py = graphY + graphSize * (1.0 - pointY);
+                screen.mouseMoved(px, py);
                 int beforeDelete = countMulti(screen);
                 dispatchDelete(screen);
                 int afterDelete = countMulti(screen);
-                log("Delete 删点：点数 " + beforeDelete + " -> " + afterDelete
-                        + (afterDelete == beforeDelete - 1 ? "  ✅" : "  ❌（预期 -1）"));
+                log(String.format("Delete 删点（鼠标指向 %.2f,%.2f → 像素 %.0f,%.0f）：点数 %d -> %d %s",
+                        pointX, pointY, px, py, beforeDelete, afterDelete,
+                        afterDelete == beforeDelete - 1 ? "  ✅" : "  ❌（预期 -1）"));
             } catch (Throwable t) {
-                log("交互检查失败: " + t);
-                Throwable cause = t.getCause();
-                while (cause != null) {
-                    log("  根因: " + cause);
-                    cause = cause.getCause();
-                }
+                log("交互检查(第二步)失败: " + t);
             }
         });
     }
@@ -1281,13 +1402,115 @@ public final class VisualTestDriver {
                 log("❌ 模式按钮是灰的（own=false 时不该继续测加点）");
                 return false;
             }
+            // 先按真实鼠标那样派发；没生效再**直接调 onPress** 兜底，并把这件事记下来。
+            // 两种方式都试是刻意的：派发无效但 onPress 有效 → 问题在事件链；
+            // 两个都没反应 → 问题在回调本身。一次运行就能把断点定下来。
+            boolean before = Boolean.TRUE.equals(readObjectField(screen, "multiMode"))
+                    && Boolean.TRUE.equals(readObjectField(screen, "moveMode"));
             click(screen, bounds.left() + bounds.width() / 2.0,
                     bounds.top() + bounds.height() / 2.0);
+            sleep(250);
+            boolean after = Boolean.TRUE.equals(readObjectField(screen, "multiMode"))
+                    && Boolean.TRUE.equals(readObjectField(screen, "moveMode"));
+            if (before == after) {
+                boolean multiBefore = Boolean.TRUE.equals(readObjectField(screen, "multiMode"));
+                log("⚠️ 派发点击没有改变模式状态，改为直接调 onPress");
+                widgetOnPress(hit);
+                sleep(250);
+                boolean multiAfter = Boolean.TRUE.equals(readObjectField(screen, "multiMode"));
+                log("直接 onPress 后：multiMode " + multiBefore + " -> " + multiAfter
+                        + (multiBefore != multiAfter ? "（说明是事件链的问题，不是回调）" : "（回调也没生效）"));
+            }
             return true;
         } catch (Throwable t) {
             log("点模式按钮失败: " + t);
             return false;
         }
+    }
+
+    /** 点「去加点 / 去移动」那个模式切换按钮（多点模式下才有） */
+    private static boolean clickCurveActionButton(Screen screen) {
+        try {
+            // 按钮是"渲染前按 dirty 标志重建"的，所以点完模式按钮后它要等下一帧才出现。
+            // **不能用写死的短 sleep**：这台机器上（软件渲染）一帧能到一秒左右，
+            // 按"一帧≈100ms"去等会一直等不到，看起来就像按钮根本没建出来 ——
+            // 这一轮被它误导了很久（日志里"待重建帧"明明拿到了标志，只是那帧来晚了）。
+            // 改成**等状态真正就绪**，上限给足。
+            Object hit = null;
+            long deadline = System.currentTimeMillis() + 15_000L;
+            while (hit == null && System.currentTimeMillis() < deadline) {
+                hit = findWidgetByTranslationKey(screen, "ui_transitions.curve.action.to_move");
+                if (hit == null) {
+                    hit = findWidgetByTranslationKey(screen, "ui_transitions.curve.action.to_add");
+                }
+                if (hit == null) {
+                    sleep(150);
+                }
+            }
+            if (hit == null) {
+                log("❌ 找不到「去加点/去移动」按钮（等了 15 秒）"
+                        + " 控件数=" + childrenCount(screen)
+                        + " multiMode=" + readObjectField(screen, "multiMode")
+                        + " moveMode=" + readObjectField(screen, "moveMode"));
+                log("控件树原始内容: " + describeChildren(screen));
+                return false;
+            }
+            net.minecraft.client.gui.navigation.ScreenRectangle bounds =
+                    (net.minecraft.client.gui.navigation.ScreenRectangle)
+                            hit.getClass().getMethod("getRectangle").invoke(hit);
+            log("动作按钮位置 " + bounds.left() + "," + bounds.top()
+                    + " active=" + hit.getClass().getField("active").get(hit));
+            // 直接调 onPress：Hub 那边的实测结论是"派发鼠标事件容易被中间层吃掉"，
+            // 而控件自己的 onPress 才是"按钮被按下"这件事本身。
+            widgetOnPress(hit);
+            return true;
+        } catch (Throwable t) {
+            log("点动作按钮失败: " + t);
+            return false;
+        }
+    }
+
+    /** 直接调控件的 onPress（诊断用：把"事件链没送到"和"回调本身没生效"分开） */
+    private static void widgetOnPress(Object widget) {
+        try {
+            widget.getClass().getMethod("onPress", net.minecraft.client.input.InputWithModifiers.class)
+                    .invoke(widget, new net.minecraft.client.input.MouseButtonInfo(1, 0));
+        } catch (Throwable t) {
+            log("onPress 调用失败: " + t.getCause());
+        }
+    }
+
+    /**
+     * 等"多点模式"真正生效。
+     *
+     * **只能在驱动线程调用**：界面状态要靠渲染帧推进，而在渲染线程里等待会把渲染线程堵死。
+     * 这也解释了为什么之前"睡 400ms 再读"时好时坏 —— 那台机器一帧能到一秒。
+     */
+    private static boolean awaitMultiMode(Screen screen) {
+        long deadline = System.currentTimeMillis() + 15_000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (Boolean.TRUE.equals(readObjectField(screen, "multiMode"))) {
+                log("等多点模式：已就绪 moveMode=" + readObjectField(screen, "moveMode"));
+                return true;
+            }
+            sleep(150);
+        }
+        log("❌ 等 15 秒仍不是多点模式：multiMode=" + readObjectField(screen, "multiMode")
+                + " moveMode=" + readObjectField(screen, "moveMode"));
+        return false;
+    }
+
+    /** 等指定字段变成期望的布尔值（同上：只能在驱动线程调用） */
+    private static boolean awaitFlag(Screen screen, String field, boolean expected) {
+        long deadline = System.currentTimeMillis() + 15_000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (Boolean.valueOf(expected).equals(readObjectField(screen, field))) {
+                return true;
+            }
+            sleep(150);
+        }
+        log("❌ 等 15 秒 " + field + " 仍不是 " + expected);
+        return false;
     }
 
     /** 部位枚举的序号（界面行序 = 序号 + 1，第 0 行是"全局"）；拿不到返回 -2 */

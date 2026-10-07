@@ -109,8 +109,22 @@ public final class UiTransitionsCurveScreen extends Screen {
     /** false = 这一行是"跟随全局"（图上曲线只读） */
     private boolean own = true;
 
+    /**
+     * 多点模式下"点一下"是加点还是移动已选中的点。
+     *
+     * 26.3 只在**真的按住拖动**时才送 mouseMoved/mouseDragged，而这套合成在手机上不可靠
+     * （上一个会话已经因此给每个数值配了原版滑块）。所以多点编辑必须有**不依赖拖动**的路：
+     * 「加点」模式下点空白 = 加点，切到「移动」模式后点哪里就把选中的点挪到哪里。
+     */
+    private boolean moveMode;
+    /** 多点模式下当前选中的内部点下标；-1 = 没选中 */
+    private int selectedPoint = -1;
+
     /** 四个原版滑块：不依赖鼠标拖拽，点一下就能改值（仅贝塞尔模式存在） */
     private final ValueSlider[] sliders = new ValueSlider[4];
+    /** 多点模式下选中点的 x/y 微调滑块（同样不依赖拖动） */
+    private ValueSlider multiXSlider;
+    private ValueSlider multiYSlider;
 
     private int graphX;
     private int graphY;
@@ -271,6 +285,13 @@ public final class UiTransitionsCurveScreen extends Screen {
     private void buildWidgets() {
         this.widgetsDirty = false;
         clearWidgets();
+        // 控件已经清空，字段也要跟着清：滑块是按模式二选一构建的，
+        // 留着上一次的引用会让 sync 逻辑去操作已经不在界面上的控件。
+        for (int i = 0; i < this.sliders.length; i++) {
+            this.sliders[i] = null;
+        }
+        this.multiXSlider = null;
+        this.multiYSlider = null;
 
         int margin = 16;
         int gap = 10;
@@ -297,16 +318,12 @@ public final class UiTransitionsCurveScreen extends Screen {
         this.graphX = margin;
         this.graphY = 44;
 
-        // 贝塞尔模式图下面还有四个滑块，多点模式没有 —— 图的高度要跟着让位。
-        // 窗口很矮时十六个像素的滑块会把图挤没，那时**宁可藏掉滑块**：
-        // 网格本来就画得比滑块高，而且"图上直接拖"这条路仍然在。
+        // 图下面的一排滑块：贝塞尔模式是 4 个控制点滑块，多点模式是 2 个"选中点"滑块。
+        // 窗口很矮时宁可藏掉滑块：图本来就画得比滑块高，而且"图上直接点"这条路仍然在。
         int bottomBar = 30;
-        int slidersBlock = 4 * 21 + 12;
-        boolean showSliders = !this.multiMode
-                && this.height - bottomBar - this.graphY - slidersBlock - 16 >= 56;
-        if (!this.multiMode) {
-            slidersBlock = showSliders ? slidersBlock : 0;
-        }
+        int slidersBlock = this.multiMode ? 2 * 21 + 12 : 4 * 21 + 12;
+        boolean showSliders = this.height - bottomBar - this.graphY - slidersBlock - 16 >= 56;
+        slidersBlock = showSliders ? slidersBlock : 0;
         int available = this.height - bottomBar - this.graphY - slidersBlock - 16;
         this.graphSize = Math.max(56, Math.min(130, Math.min(columnWidth, available)));
 
@@ -314,7 +331,11 @@ public final class UiTransitionsCurveScreen extends Screen {
         this.sliderY = this.graphY + this.graphSize + 14;
         this.sliderWidth = columnWidth;
         if (showSliders) {
-            buildSliders();
+            if (this.multiMode) {
+                buildMultiSliders();
+            } else {
+                buildSliders();
+            }
         }
 
         this.previewX = this.graphX + columnWidth + 14;
@@ -342,14 +363,27 @@ public final class UiTransitionsCurveScreen extends Screen {
             if (this.multiMode) {
                 // 多点模式的"重置"= 清掉所有中间点，回到匀速直线
                 this.multi = new float[0];
+                this.selectedPoint = -1;
+                syncMultiSliders();
             } else {
                 float[] def = TransitionConfig.parseBezier(TransitionConfig.DEFAULT_CUSTOM_BEZIER);
                 this.points = new float[] { def[0], def[1], def[2], def[3] };
                 syncSliders();
             }
         }).bounds(this.graphX, y, buttonWidth, height).build();
-        Button modeButton = Button.builder(modeLabel(), b -> toggleMode())
+        Button modeButton = Button.builder(modeLabel(), b -> cycleMode())
                 .bounds(this.graphX + buttonWidth + gap, y, buttonWidth, height).build();
+
+        // 第三个按钮只在多点模式下有意义：在「加点」与「移动」之间切。
+        // 二者都要用"点一下"这个手势，不分开就没法表达意图（手机上尤其如此）。
+        if (this.multiMode) {
+            Button actionButton = Button.builder(actionLabel(), b -> {
+                this.moveMode = !this.moveMode;
+                this.widgetsDirty = true;      // 标签要跟着换
+            }).bounds(this.graphX + (buttonWidth + gap) * 2, y, buttonWidth, height).build();
+            actionButton.active = editable();
+            addRenderableWidget(actionButton);
+        }
 
         // 部位"跟随全局"时这几处都必须**禁掉**，不能只禁模式按钮：
         // 保存时 save() 第一行就 `if (!editable()) return;`，所以那时用户拖的手柄、点的重置
@@ -374,30 +408,60 @@ public final class UiTransitionsCurveScreen extends Screen {
                 : "ui_transitions.curve.mode.to_multi");
     }
 
+    /** 多点模式下第三个按钮的标签：显示的**下一个**状态 */
+    private Component actionLabel() {
+        return Component.translatable(this.moveMode
+                ? "ui_transitions.curve.action.to_add"
+                : "ui_transitions.curve.action.to_move");
+    }
+
     /**
-     * 贝塞尔 ↔ 多点。两个方向都**尽量保住当前的形状**：
-     * 切到多点时按当前曲线取样铺 6 个点，切回贝塞尔时按两端切线换算控制点。
+     * 三种状态循环：控制点 → 多点（加点）→ 多点（移动）→ 控制点。
+     *
+     * 为什么是一个按钮而不是两个：窄窗口下按钮已经排到第 4 个（52px 一个），
+     * 再拆就没地方放了；而"模式"本身就是一组互斥状态，循环按钮最直观。
+     * 贝塞尔 ↔ 多点两个方向都**尽量保住形状**（见下面取样/换算），
      * 直接丢掉重来的话，用户切过去看一眼再切回来就白调了。
      */
-    private void toggleMode() {
-        TransitionConfig.Curve before = editingCurve();
-        if (this.multiMode) {
-            this.points = TransitionConfig.Curve.multiToBezier(fullMulti());
-            this.multiMode = false;
-            this.multi = new float[0];
-        } else {
-            java.util.List<Float> sampled = new java.util.ArrayList<>();
-            for (int i = 1; i <= 5; i++) {
-                float t = i / 6.0F;
-                sampled.add(t);
-                sampled.add(clampY(before.easeIn(t)));
-            }
-            this.multi = new float[sampled.size()];
-            for (int i = 0; i < this.multi.length; i++) {
-                this.multi[i] = sampled.get(i);
-            }
-            this.multiMode = true;
+    private void cycleMode() {
+        if (!this.multiMode) {
+            enterMultiMode();
+            return;
         }
+        if (!this.moveMode) {
+            this.moveMode = true;      // 多点·加点 → 多点·移动
+            this.widgetsDirty = true;
+            return;
+        }
+        leaveMultiMode();              // 多点·移动 → 控制点
+    }
+
+    private void enterMultiMode() {
+        TransitionConfig.Curve before = editingCurve();
+        java.util.List<Float> sampled = new java.util.ArrayList<>();
+        for (int i = 1; i <= 5; i++) {
+            float t = i / 6.0F;
+            sampled.add(t);
+            sampled.add(clampY(before.easeIn(t)));
+        }
+        this.multi = new float[sampled.size()];
+        for (int i = 0; i < this.multi.length; i++) {
+            this.multi[i] = sampled.get(i);
+        }
+        this.multiMode = true;
+        this.moveMode = false;
+        this.selectedPoint = -1;
+        this.dragging = 0;
+        this.draggingPoint = -1;
+        this.widgetsDirty = true;
+    }
+
+    private void leaveMultiMode() {
+        this.points = TransitionConfig.Curve.multiToBezier(fullMulti());
+        this.multiMode = false;
+        this.moveMode = false;
+        this.multi = new float[0];
+        this.selectedPoint = -1;
         this.dragging = 0;
         this.draggingPoint = -1;
         this.widgetsDirty = true;
@@ -424,6 +488,53 @@ public final class UiTransitionsCurveScreen extends Screen {
             slider.active = editable();
             this.sliders[i] = slider;
             addRenderableWidget(slider);
+        }
+    }
+
+    /**
+     * 多点模式下给**选中的那个点**配两个滑块（x / y）。
+     *
+     * 这是"点选式移动"之外的精度补充：点选负责大范围挪，滑块负责最后一两像素。
+     * 两者都不依赖拖动，所以手机上一定可用。
+     */
+    private void buildMultiSliders() {
+        this.multiXSlider = new ValueSlider(this.sliderX, this.sliderY, this.sliderWidth, 20,
+                "X", 0.0F, 1.0F, 0.5F, value -> moveSelected(value, null));
+        this.multiYSlider = new ValueSlider(this.sliderX, this.sliderY + 21, this.sliderWidth, 20,
+                "Y", VIEW_MIN, VIEW_MAX, 0.5F, value -> moveSelected(null, value));
+        addRenderableWidget(this.multiXSlider);
+        addRenderableWidget(this.multiYSlider);
+        syncMultiSliders();
+    }
+
+    /** 把选中点挪到指定坐标（传 null 表示这一维不动） */
+    private void moveSelected(Float x, Float y) {
+        if (!this.multiMode || this.selectedPoint < 0 || !editable()) {
+            return;
+        }
+        float[] full = fullMulti();
+        float nx = x != null ? x : TransitionConfig.Curve.pointX(full, this.selectedPoint);
+        float ny = y != null ? y : TransitionConfig.Curve.pointY(full, this.selectedPoint);
+        this.multi = interiorOf(TransitionConfig.Curve.moveMulti(full, this.selectedPoint, nx, ny));
+        if (x == null || y == null) {
+            // 有一维是被滑块推着走的，把另一维也刷成实际值（可能被邻居夹过）
+            syncMultiSliders();
+        }
+    }
+
+    /** 让两个多点滑块显示当前选中点的实际坐标；没选中就灰掉 */
+    private void syncMultiSliders() {
+        if (this.multiXSlider == null || this.multiYSlider == null) {
+            return;
+        }
+        float[] full = fullMulti();
+        boolean has = this.multiMode && this.selectedPoint >= 0
+                && this.selectedPoint < TransitionConfig.Curve.interiorPointCount(full);
+        this.multiXSlider.active = has && editable();
+        this.multiYSlider.active = has && editable();
+        if (has) {
+            this.multiXSlider.setFromModel(TransitionConfig.Curve.pointX(full, this.selectedPoint));
+            this.multiYSlider.setFromModel(TransitionConfig.Curve.pointY(full, this.selectedPoint));
         }
     }
 
@@ -597,8 +708,13 @@ public final class UiTransitionsCurveScreen extends Screen {
         } else if (this.draggingPoint >= 0) {
             state = Component.translatable("ui_transitions.curve.dragging_point", this.draggingPoint + 1);
         } else if (this.multiMode) {
-            state = Component.translatable("ui_transitions.curve.multi_hint",
-                    TransitionConfig.Curve.interiorPointCount(fullMulti()));
+            // 提示必须说清"现在点一下会发生什么"：加点和移动共用同一个手势，
+            // 不说清楚用户没法知道为什么点下去有时加点、有时挪点。
+            state = Component.translatable(this.moveMode
+                            ? "ui_transitions.curve.multi_hint.move"
+                            : "ui_transitions.curve.multi_hint.add",
+                    TransitionConfig.Curve.interiorPointCount(fullMulti()),
+                    this.selectedPoint >= 0 ? this.selectedPoint + 1 : 0);
         } else {
             state = Component.translatable("ui_transitions.curve.drag_hint");
         }
@@ -1152,22 +1268,28 @@ public final class UiTransitionsCurveScreen extends Screen {
     /**
      * 点击图框内**任意位置**都会有反应：抓住最近的那个方块，并立刻挪过去。
      *
-     * 不靠 mouseDragged：26.3 里 AbstractContainerEventHandler 没有实现 mouseClicked，
-     * 拖动依赖 MouseHandler 的内部状态，不保证送达。按住之后改用 mouseMoved 跟踪。
+     * ## 为什么先自己处理、再交给控件（顺序很关键）
+     *
+     * `super.mouseClicked` 会遍历控件树，**任何一个控件消费掉这次点击就返回 true** ——
+     * 原先这里第一行就是 `if (super.mouseClicked(...)) return true;`，于是
+     * 「图/动画列表」这类**自己画、自己判命中**的区域，只要落点被某个控件认领过，
+     * 就永远轮不到我们。实测反馈正是这个症状：入口页的原版按钮点得动，
+     * 而自己画的动画列表点不动、图上也拖不动（鼠标移上去有高亮，按下去没反应）。
+     *
+     * 所以顺序改成：**先看是不是我这几个自绘区域 → 是就自己处理并吞掉；不是再交给控件。**
+     * 这样控件仍然拿得到属于它的点击（按钮在这些区域之外，两者不重叠）。
      *
      * 多点模式下的判定顺序（一次点击只做一件事）：
      *   ① 双击 → 删掉指着的那个点（首尾不动）
-     *   ② 离已有点够近 → 抓住它
-     *   ③ 否则 → 在这个 x 上加一个新点
-     * ①②优先于③，是为了让"双击删点"和"拖点"不会被"加了个新点"搅乱。
+     *   ② 离已有点够近 → 选中/抓住它
+     *   ③ 有选中的点 → 把它移到这里（**点选式移动，不依赖拖动**）
+     *   ④ 否则 → 在这个 x 上加一个新点
+     * ①②优先于③④，是为了让"双击删点"和"移动点"不会被"加了个新点"搅乱。
      */
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-        if (super.mouseClicked(event, doubleClick)) {
-            return true;
-        }
         if (event.button() != 0) {
-            return false;
+            return super.mouseClicked(event, doubleClick);
         }
         double mx = event.x();
         double my = event.y();
@@ -1175,25 +1297,40 @@ public final class UiTransitionsCurveScreen extends Screen {
             CLICK_LOGGED++;
             System.out.println("[UI Transitions] 曲线界面收到左键点击 (" + Math.round(mx) + ","
                     + Math.round(my) + ")  图框=" + this.graphX + "," + this.graphY
-                    + " 尺寸=" + this.graphSize + "  在图框内=" + isInsideGraph(mx, my));
+                    + " 尺寸=" + this.graphSize + "  在图框内=" + isInsideGraph(mx, my)
+                    + " 在列表内=" + (rowAt(mx, my) >= 0));
         }
+        // ---- 先处理自绘区域 ----
         if (handlePartsClick(mx, my)) {
             return true;
         }
-        if (!isInsideGraph(mx, my) || !editable()) {
-            return false;
+        if (isInsideGraph(mx, my) && editable()) {
+            if (this.multiMode) {
+                handleMultiClick(mx, my, doubleClick);
+            } else {
+                int first = distance(mx, my, this.points[0], this.points[1]);
+                int second = distance(mx, my, this.points[2], this.points[3]);
+                this.dragging = first <= second ? 1 : 2;
+                applyDrag(mx, my);
+            }
+            return true;
         }
-        if (this.multiMode) {
-            handleMultiClick(mx, my, doubleClick);
-        } else {
-            int first = distance(mx, my, this.points[0], this.points[1]);
-            int second = distance(mx, my, this.points[2], this.points[3]);
-            this.dragging = first <= second ? 1 : 2;
-            applyDrag(mx, my);
-        }
-        return true;
+        // ---- 都不是才交给控件 ----
+        return super.mouseClicked(event, doubleClick);
     }
 
+    /**
+     * 多点模式下一次点击的含义。
+     *
+     * 判定顺序（一次点击只做一件事）：
+     *   ① 双击落在点上 → 删掉它（首尾不动）
+     *   ② 落在某个点上 → 选中它（并允许接着拖）
+     *   ③ 「移动」模式且已有选中的点 → 把它挪到点的地方 ← **不依赖拖动的那条路**
+     *   ④ 「加点」模式 → 在这个 x 上加一个新点（并选中它）
+     *
+     * ③④ 用一个显式模式区分，是因为二者都要用"点一下"这个手势：
+     * 不加区分的话，"移动一个点"和"在别处加一个点"会互相抢，用户没法表达意图。
+     */
     private void handleMultiClick(double mouseX, double mouseY, boolean doubleClick) {
         int index = nearestPointIndex(mouseX, mouseY, POINT_GRAB_DISTANCE);
         if (doubleClick) {
@@ -1205,17 +1342,31 @@ public final class UiTransitionsCurveScreen extends Screen {
             return;
         }
         if (index >= 0) {
+            // 选中，并且允许直接拖着走（能拖的设备照旧顺手）
+            this.selectedPoint = index;
             this.dragging = 3;
             this.draggingPoint = index;
+            syncMultiSliders();
+            return;
+        }
+        if (this.moveMode) {
+            // 把选中的点挪到这里 —— 手机上主要靠这条
+            if (this.selectedPoint >= 0) {
+                this.multi = interiorOf(TransitionConfig.Curve.moveMulti(
+                        fullMulti(), this.selectedPoint, fromScreenX(mouseX), fromScreenY(mouseY)));
+                syncMultiSliders();
+            }
             return;
         }
         float[] before = fullMulti();
         float[] after = TransitionConfig.Curve.insertMulti(before, fromScreenX(mouseX), fromScreenY(mouseY));
         if (after != before) {
             this.multi = interiorOf(after);
+            this.selectedPoint = nearestPointIndex(mouseX, mouseY, POINT_GRAB_DISTANCE);
             // 新加的点马上就能拖：按下即抓住，符合"点一下放这儿、挪一挪调准"
             this.dragging = 3;
-            this.draggingPoint = nearestPointIndex(mouseX, mouseY, POINT_GRAB_DISTANCE);
+            this.draggingPoint = this.selectedPoint;
+            syncMultiSliders();
         }
     }
 

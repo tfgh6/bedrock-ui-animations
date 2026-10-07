@@ -397,6 +397,12 @@ public final class UiTransitions {
         FRAME_ALPHA.set(alpha);
         TEXT_ALPHA.set(textAlpha);
         PIP_FRAME_ALPHA = alpha;       // 帧级：渲染阶段贴画中画时还要用
+        // **压栈在这里是无条件的**（历史上这里曾经只在某些分支走到）：
+        // endBackgroundLayer / endContentLayer 只看自己那一对 begin 有没有跑过就弹栈，
+        // 少压一次就等于多弹一次，整个渲染管线的矩阵栈会错位 ——
+        // 后果是后续绘制坐标全偏，甚至把裁剪区算成 0 高/0 宽而崩在渲染阶段
+        // （26.3 的裁剪是延迟下发的，堆栈里看不到调用者）。
+        // 关掉淡变时位移照旧生效（那本来就是"只滑动、不淡出"），所以这一压栈也是必须的。
         Matrix3x2fStack pose = extractor.pose();
         pose.pushMatrix();
         pose.translate(0.0F, shift);
