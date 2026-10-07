@@ -1,6 +1,8 @@
 package com.uitransitions;
 
+import com.uitransitions.anim.Channel;
 import com.uitransitions.anim.ColorMath;
+import com.uitransitions.anim.Engine;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -557,7 +559,7 @@ public final class UiTransitions {
 
     /** 贴图块、纯色块（含底板与遮罩渐变）的 alpha 调制 */
     public static int applyAlphaBlit(int color) {
-        return modulate(color);
+        return ENGINE.apply(Channel.BLIT, color);
     }
 
     /** 文字（含文字背景）的 alpha 调制，可单独关闭 */
@@ -577,7 +579,50 @@ public final class UiTransitions {
         if (chatFadeActive) {
             alpha *= chatFadeAlpha();
         }
-        return modulate(color, alpha);
+        return ENGINE.apply(Channel.TEXT, color, alpha);
+    }
+
+    /**
+     * 颜色通道路由（第 2 步）。
+     *
+     * 三个来源都指向**现有的 ThreadLocal** —— 所以行为逐位不变，只是把
+     * "这条颜色属于哪条通道"从隐式（谁在读哪个 ThreadLocal）改成显式（传哪个 {@link Channel}）。
+     *
+     * 迁移说明：第 3 步把这三个 ThreadLocal 换成帧上下文时，**只要把这三个取值器换掉**，
+     * 通道定义与调用点都不用再动。
+     *
+     * 就绪判据沿用 {@code TransitionConfig.ensureLoaded()}：GUI 渲染可能发生在 Minecraft
+     * 尚未初始化时，那时不该读任何全局状态；它与 {@link TransitionConfig#ensureLoaded()}
+     * 内部那次 {@code synchronized} 只跑一次的行为一致（本类到处都在直接调用它）。
+     */
+    private static final Engine ENGINE = new Engine(
+            () -> {
+                guardConfigLoaded();
+                return (double) WINDOW_ALPHA.get();
+            },
+            () -> {
+                guardConfigLoaded();
+                return (double) TEXT_ALPHA.get();
+            },
+            () -> (double) PIP_FRAME_ALPHA,
+            UiTransitions::configLoadedOrNotNeeded);
+
+    /** 读任何 alpha 之前先把配置加载起来（与现有实现处处直接调它保持一致）。 */
+    private static void guardConfigLoaded() {
+        TransitionConfig.ensureLoaded();
+    }
+
+    /**
+     * 就绪判据。
+     *
+     * 刻意**永远返回 true**：现有实现的 {@code applyAlphaBlit} / {@code applyAlphaText}
+     * 本来就没有"未就绪就原样返回"的守卫，它们的 ThreadLocal 都有非 null 初值，
+     * 在 `ensureLoaded` 之前读也是安全且行为确定的（返回 1.0）。
+     * 若这里返回 false，反而会**改变行为**（把本该淡变的颜色原样返回）。
+     * 引擎保留这个钩子是为了第 3 步接入帧上下文时有一个明确的落点。
+     */
+    private static boolean configLoadedOrNotNeeded() {
+        return true;
     }
 
     private static int modulate(int color) {
