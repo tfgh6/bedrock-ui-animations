@@ -128,21 +128,39 @@ def main():
     if proc.returncode != 0:
         sys.exit("编译失败（退出码 %d）" % proc.returncode)
 
-    # 跑验证台：Main-Class 由 anim-verify 里的类决定，这里固定取 MathLayerVerify
-    run_cmd = [java, "-Duser.language=en", "-Dfile.encoding=UTF-8",
-               "-cp", os.pathsep.join([OUT, mc_jar]), "com.uitransitions.anim.MathLayerVerify"]
-    proc = subprocess.run(run_cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env=CHILD_ENV)
-    if proc.stdout.strip():
-        print(proc.stdout.strip())
-    if proc.stderr.strip():
-        print(proc.stderr.strip(), file=sys.stderr)
-    if proc.returncode != 0:
-        sys.exit("动画数学层验证未通过（退出码 %d）" % proc.returncode)
+    # 跑验证台。
+    #
+    # **这里是一串程序，不是一个**：每个验证台守着一块，跑漏一个就等于那块没闸 ——
+    # `ColorMathVerify` 就曾经是"写着、绿着、但没人跑"的状态（编译清单里有它、
+    # 运行清单里没有）。新增验证台时只要往 PROGRAMS 加一行。
+    PROGRAMS = [
+        ("动画数学层（与旧实现逐位一致）",
+         "com.uitransitions.anim.MathLayerVerify"),
+        ("颜色数学与通道（与旧 modulate 逐位等价 + 预乘是显式参数）",
+         "com.uitransitions.anim.ColorMathVerify"),
+    ]
+    classpath = os.pathsep.join([OUT, mc_jar])
+    failed = []
+    for label, main_class in PROGRAMS:
+        print()
+        print("-- %s" % label)
+        run_cmd = [java, "-Duser.language=en", "-Dfile.encoding=UTF-8",
+                   "-cp", classpath, main_class]
+        proc = subprocess.run(run_cmd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=CHILD_ENV)
+        if proc.stdout.strip():
+            print(proc.stdout.strip())
+        if proc.stderr.strip():
+            print(proc.stderr.strip(), file=sys.stderr)
+        if proc.returncode != 0:
+            failed.append("%s（退出码 %d）" % (label, proc.returncode))
+
+    if failed:
+        sys.exit("验证台未通过：" + "；".join(failed))
 
     if not args.keep and os.path.isdir(OUT):
         shutil.rmtree(OUT, ignore_errors=True)
-    print("\n动画数学层验证通过（与旧实现逐位一致）")
+    print("\n%d 个验证台全部通过" % len(PROGRAMS))
     return 0
 
 
