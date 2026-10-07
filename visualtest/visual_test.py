@@ -12,6 +12,7 @@
 --------
     python visualtest/visual_test.py                     # 全流程（较慢，会建世界）
     python visualtest/visual_test.py --phases curve      # 只验曲线编辑器（不用建世界，快）
+    python visualtest/visual_test.py --phases curveui    # 只验曲线编辑器的交互（点列表 / 加点 / 删点）
     python visualtest/visual_test.py --phases curve,config
     python visualtest/visual_test.py --phases inventory,enchant
     python visualtest/visual_test.py --list              # 看有哪些阶段
@@ -22,7 +23,9 @@
 --------
     panels     合成面板的开/关动画（默认基线，含字幕探针）
     config     Cloth 图形化配置界面
+    hub        入口页四个按钮能不能把各自的界面打开（真派发点击）
     curve      曲线编辑器（渐入 / 渐出两页）
+    curveui    曲线编辑器的交互：点动画列表、切多点模式、加点/删点、核对布局宽度
     world      只进世界并抓一张
     inventory  生存背包：玩家小模型（画中画）是否跟着界面动
     enchant    附魔台：附魔书（画中画）是否跟着界面动、有没有被裁
@@ -63,8 +66,10 @@ JAR = os.path.join(JDK, "bin", "jar.exe")
 PHASES = {
     "panels": "合成面板的开/关动画（基线，含字幕探针）",
     "config": "Cloth 图形化配置界面",
-    "configclick": "配置界面里「打开曲线编辑器」入口能不能点开",
+    "hub": "入口页四个按钮能不能把各自的界面打开（用户抱怨过点了没反应）",
+    "hubnarrow": "窄窗口下进入口页（复现手机上 Scissor 864x0 崩溃）",
     "curve": "曲线编辑器（渐入 / 渐出）",
+    "curveui": "曲线编辑器的交互：动画列表 / 多点加点删点 / 布局宽度核对",
     "world": "只进世界并抓一张",
     "inventory": "生存背包：玩家小模型（画中画）",
     "enchant": "附魔台：附魔书（画中画）",
@@ -73,6 +78,9 @@ PHASES = {
 }
 
 WORLD_PHASES = {"world", "inventory", "enchant", "creative"}
+
+# --strict 时，日志里的 ❌ 会让本步骤失败。默认关闭（见 main 末尾的说明）。
+STRICT = False
 
 # 子进程一律用 UTF-8：这套脚本和它调用的工具都会打印中文，
 # 而 Windows 上 Python 默认按 GBK 编码 stdout，直接跑会 UnicodeEncodeError。
@@ -274,19 +282,44 @@ def summarize(phases):
         size = sum(os.path.getsize(os.path.join(OUT_DIR, f)) for f in files)
         print("    %-22s %2d 张  %6.1f KB   例: %s" % (prefix, len(files), size / 1024.0, files[0]))
 
-    # 从日志里挑出失败与关键结论，省得人工翻
+    # 从日志里挑出失败与关键结论，省得人工翻。
+    #
+    # 除了"失败/警告/根因"这些**词**，还要认驱动打出来的 ❌ **符号**：
+    # 驱动里大量检查是"打到日志里的判定结论"（`点第 3 行：部位 -> ITEMS ✅`），
+    # 它们不带"失败"二字。只按词筛的话，一次已经失败的运行会被汇总成
+    # "（没有失败/警告）" —— 这一轮就真的这么发生过：configclick 明明 ❌ 了，
+    # 汇总却说一切正常，全靠去看截图文件名才发现。
+    #
+    # 返回值 = 日志里有几条 ❌。调用方据此决定要不要让本步骤失败（见 main 的 --strict）。
+    fails = 0
     if os.path.isfile(LOG_PATH):
         interesting = []
+        checked = 0
         with open(LOG_PATH, encoding="utf-8", errors="replace") as fh:
             for line in fh:
-                if "[VisualTest]" in line and ("失败" in line or "警告" in line or "根因" in line):
+                if "[VisualTest]" not in line:
+                    continue
+                if "✅" in line or "❌" in line:
+                    checked += 1
+                if "❌" in line:
+                    fails += 1
+                if "失败" in line or "警告" in line or "根因" in line or "❌" in line:
                     interesting.append(line.strip())
         print("\n  测试日志里值得注意的行:")
+        if checked:
+            print("    （驱动共做出 %d 条带结论的检查，其中 ❌ %d 条）" % (checked, fails))
         if interesting:
             for line in interesting[:25]:
-                print("    " + line)
+                print("    %s" % line)
         else:
             print("    （没有失败/警告）")
+        if fails:
+            print("\n  ⚠️ 日志里有 %d 条 ❌。%s"
+                  % (fails, "已按 --strict 判为失败" if STRICT else
+                     "默认不算失败（加 --strict 让它影响退出码）"))
+    else:
+        print("\n  找不到日志文件，无法汇总：%s" % LOG_PATH)
+    return fails
 
 
 def main():
@@ -298,7 +331,12 @@ def main():
     parser.add_argument("--no-launch", action="store_true", help="只编译，不启动游戏")
     parser.add_argument("--keep", action="store_true",
                         help="保留 build/visual-out 里上一轮的截图（默认会先清空，避免新旧混淆）")
+    parser.add_argument("--strict", action="store_true",
+                        help="日志里出现 ❌ 就让本步骤失败（CI / 发版前用；默认只看游戏退出码）")
     args = parser.parse_args()
+
+    global STRICT
+    STRICT = bool(args.strict)
 
     if args.list:
         print("可选阶段（--phases a,b）:")
@@ -363,8 +401,17 @@ def main():
         for line in tail:
             print("    " + line, file=sys.stderr)
         return code
-    summarize(phases)
+    fails = summarize(phases)
     print("\n完成。截图在 %s" % OUT_DIR)
+    # **--strict：让日志里的 ❌ 真正影响退出码。**
+    #
+    # 默认不加，是为了不破坏现有的"看截图"工作流 —— 玩家/我平时跑它主要是为了拿图。
+    # 但"只有游戏进程非 0 才算失败"意味着：驱动判定了 ❌、退出码仍是 0，
+    # 自动化层面这是一条假绿通道（另一个会话审出来时只修了"人不容易漏看"，没接判定）。
+    # CI 或发版前请加 --strict。
+    if STRICT and fails:
+        print("\n!! --strict：日志里有 %d 条 ❌，判为失败" % fails, file=sys.stderr)
+        return 1
     return 0
 
 

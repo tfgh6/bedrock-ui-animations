@@ -5,12 +5,13 @@ iconFile = "assets/ui_transitions/icon.png"
 
 [[mods]]
 modId = "ui_transitions"
-version = "1.3.19"
+version = "1.5.01"
 displayName = "Bedrock UI Animations"
 logoFile = "assets/ui_transitions/icon.png"
+# 元数据没法跟着游戏语言切换，所以这里写成中英双语，两个加载器保持一致
 description = '''
-为容器 / 菜单界面添加滑入滑出与淡入淡出过渡动画（基岩版风格）。纯客户端。
-同一 jar 同时支持 Fabric 与 NeoForge；NeoForge 侧只依赖下面声明的 Mixin 配置。
+Bedrock-style slide + fade transitions for container and menu UIs, with per-layer toggles. Client-side only.
+为容器 / 菜单界面添加基岩版风格的滑入滑出与淡入淡出过渡动画，含逐层开关。纯客户端。
 '''
 authors = "KurumiのZaphkiel, JiaWang-sama"
 

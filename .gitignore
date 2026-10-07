@@ -33,3 +33,4 @@ verify-uit/classes/
 verify-uit/stub-classes/
 # 对原版 mod 的修补产物（同样属于他人作品）
 patched/
+build/neotest/

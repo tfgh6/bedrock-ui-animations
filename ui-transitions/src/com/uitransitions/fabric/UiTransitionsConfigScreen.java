@@ -42,7 +42,7 @@ public final class UiTransitionsConfigScreen {
         private final Screen parent;
 
         private FallbackScreen(Screen parent) {
-            super(Component.literal("UI Transitions"));
+            super(Component.translatable("ui_transitions.config.title"));
             this.parent = parent;
         }
 
@@ -50,7 +50,7 @@ public final class UiTransitionsConfigScreen {
         protected void init() {
             int width = Math.min(360, Math.max(120, this.width - 20));
             addRenderableWidget(Button.builder(
-                            Component.literal("配置界面构建失败，点此返回；可直接编辑 config/ui-transitions.properties"),
+                            Component.translatable("ui_transitions.config.fallback"),
                             // 26.3 的 Minecraft 没有 setScreen，只有 setScreenAndShow
                             button -> this.minecraft.setScreenAndShow(this.parent))
                     .bounds((this.width - width) / 2, this.height / 2 - 10, width, 20)
@@ -66,242 +66,250 @@ public final class UiTransitionsConfigScreen {
     private static Screen build(Screen parent) {
         ConfigBuilder builder = ConfigBuilder.create()
                 .setParentScreen(parent)
-                .setTitle(Component.literal("UI Transitions 界面过渡动画"))
+                .setTitle(Component.translatable("ui_transitions.config.header"))
                 .setSavingRunnable(TransitionConfig::save);
 
         ConfigEntryBuilder entries = builder.entryBuilder();
 
         // ============================================================ 动画
-        ConfigCategory anim = builder.getOrCreateCategory(Component.literal("动画"));
+        ConfigCategory anim = builder.getOrCreateCategory(Component.translatable("ui_transitions.config.category.animation"));
 
-        anim.addEntry(entries.startBooleanToggle(Component.literal("启用动画"), TransitionConfig.enabled())
+        anim.addEntry(entries.startBooleanToggle(Component.translatable("ui_transitions.config.enabled"), TransitionConfig.enabled())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("总开关。关闭后完全等同原版界面"))
+                .setTooltip(Component.translatable("ui_transitions.config.enabled.tip"))
                 .setSaveConsumer(TransitionConfig::setEnabled)
                 .build());
 
-        anim.addEntry(entries.startIntSlider(Component.literal("位移距离（像素）"),
+        anim.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.offset"),
                         Math.round(TransitionConfig.offset()), 0, 400)
                 .setDefaultValue(Math.round(TransitionConfig.DEFAULT_OFFSET))
-                .setTooltip(Component.literal("界面滑动多少像素，默认 120；0 = 只淡入淡出、不滑动"))
+                .setTooltip(Component.translatable("ui_transitions.config.offset.tip"))
                 .setSaveConsumer(value -> TransitionConfig.setOffset(value))
                 .build());
 
-        anim.addEntry(entries.startIntSlider(Component.literal("果冻回弹强度（%）"),
+        anim.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.jelly"),
                         Math.round(TransitionConfig.jelly() * 100.0F), 0, 100)
                 .setDefaultValue(0)
-                .setTooltip(Component.literal("打开时冲过静止位置再回落的弹性手感，0 = 关闭（默认）"))
+                .setTooltip(Component.translatable("ui_transitions.config.jelly.tip"))
                 .setSaveConsumer(value -> TransitionConfig.setJelly(value / 100.0F))
                 .build());
 
         // 用文本输入而不是下拉菜单：Cloth 的下拉菜单类会引入额外的注解依赖
         anim.addEntry(entries.startStrField(
-                        Component.literal("缓动曲线（通用）"), TransitionConfig.curve().id())
+                        Component.translatable("ui_transitions.config.curve_common"), TransitionConfig.curve().id())
                 .setDefaultValue(TransitionConfig.Curve.CUBIC.id())
                 .setErrorSupplier(UiTransitionsConfigScreen::curveError)
-                .setTooltip(Component.literal("影响动画手感，可选："),
-                        Component.literal("linear 匀速 / sine 柔和 / cubic 默认 / quart、quint 更急"),
-                        Component.literal("/ expo 极快收尾 / circ 圆弧 / back 回拉一下再走"),
-                        Component.literal("/ custom 自定义（用下面的「自定义曲线参数」）"))
+                .setTooltip(Component.translatable("ui_transitions.config.curve_common.tip1"),
+                        Component.translatable("ui_transitions.config.curve_common.tip2"),
+                        Component.translatable("ui_transitions.config.curve_common.tip3"),
+                        Component.translatable("ui_transitions.config.curve_common.tip4"))
                 .setSaveConsumer(TransitionConfig::setCurveId)
                 .build());
 
-        anim.addEntry(entries.startIntSlider(Component.literal("渐入时长（毫秒）"), TransitionConfig.openDurationMs(),
+        anim.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.open_duration"), TransitionConfig.openDurationMs(),
                         TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS)
                 .setDefaultValue(TransitionConfig.DEFAULT_DURATION_MS)
-                .setTooltip(Component.literal("打开界面时的动画时长，默认 500；太短会看起来像闪一下"),
-                        Component.literal("觉得拖沓就往小调，觉得一闪而过就往大调"))
+                .setTooltip(Component.translatable("ui_transitions.config.open_duration.tip1"),
+                        Component.translatable("ui_transitions.config.open_duration.tip2"))
                 .setSaveConsumer(TransitionConfig::setOpenDurationMs)
                 .build());
 
-        anim.addEntry(entries.startIntSlider(Component.literal("渐出时长（毫秒）"), TransitionConfig.closeDurationMs(),
+        anim.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.close_duration"), TransitionConfig.closeDurationMs(),
                         TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS)
                 .setDefaultValue(TransitionConfig.DEFAULT_DURATION_MS)
-                .setTooltip(Component.literal("关闭界面时的动画时长，默认 500。"),
-                        Component.literal("很多人喜欢让关闭比打开更快一点，比如渐入 500 / 渐出 350"))
+                .setTooltip(Component.translatable("ui_transitions.config.close_duration.tip1"),
+                        Component.translatable("ui_transitions.config.close_duration.tip2"))
                 .setSaveConsumer(TransitionConfig::setCloseDurationMs)
                 .build());
 
+        anim.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.chat_fade"),
+                        TransitionConfig.chatFadeMs(),
+                        TransitionConfig.MIN_CHAT_FADE_MS, TransitionConfig.MAX_CHAT_FADE_MS)
+                .setDefaultValue(TransitionConfig.DEFAULT_CHAT_FADE_MS)
+                .setTooltip(Component.translatable("ui_transitions.config.chat_fade.tip1"),
+                        Component.translatable("ui_transitions.config.chat_fade.tip2"))
+                .setSaveConsumer(TransitionConfig::setChatFadeMs)
+                .build());
+
         anim.addEntry(entries.startStrField(
-                        Component.literal("渐入曲线（可单独设）"), TransitionConfig.openCurve().id())
+                        Component.translatable("ui_transitions.config.open_curve"), TransitionConfig.openCurve().id())
                 .setDefaultValue(TransitionConfig.Curve.CUBIC.id())
                 .setErrorSupplier(UiTransitionsConfigScreen::curveError)
-                .setTooltip(Component.literal("打开界面时用的曲线；想和渐出不一样就改这里"))
+                .setTooltip(Component.translatable("ui_transitions.config.open_curve.tip"))
                 .setSaveConsumer(TransitionConfig::setOpenCurve)
                 .build());
 
         anim.addEntry(entries.startStrField(
-                        Component.literal("渐出曲线（可单独设）"), TransitionConfig.closeCurve().id())
+                        Component.translatable("ui_transitions.config.close_curve"), TransitionConfig.closeCurve().id())
                 .setDefaultValue(TransitionConfig.Curve.CUBIC.id())
                 .setErrorSupplier(UiTransitionsConfigScreen::curveError)
-                .setTooltip(Component.literal("关闭界面时用的曲线；想和渐入不一样就改这里"))
+                .setTooltip(Component.translatable("ui_transitions.config.close_curve.tip"))
                 .setSaveConsumer(TransitionConfig::setCloseCurve)
                 .build());
 
 
         // ============================================================ 参与动画的部分
-        ConfigCategory layers = builder.getOrCreateCategory(Component.literal("参与动画的部分"));
+        ConfigCategory layers = builder.getOrCreateCategory(Component.translatable("ui_transitions.config.category.layers"));
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("关闭时内容提前淡出"), TransitionConfig.staggerClose())
+                        Component.translatable("ui_transitions.config.stagger_close"), TransitionConfig.staggerClose())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("关闭动画里物品与文字比底板略早结束淡出，避免出现空格子"))
+                .setTooltip(Component.translatable("ui_transitions.config.stagger_close.tip"))
                 .setSaveConsumer(TransitionConfig::setStaggerClose)
                 .build());
 
         // ---- 逐元素淡变的四个细分开关（Sodium 页也有，保持一致）----
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("逐元素淡入淡出"), TransitionConfig.fade())
+                        Component.translatable("ui_transitions.config.fade"), TransitionConfig.fade())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("物品与文字是否逐元素淡变。关掉 = 只滑动、不淡"))
+                .setTooltip(Component.translatable("ui_transitions.config.fade.tip"))
                 .setSaveConsumer(TransitionConfig::setFade)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("遮罩随动画一起淡出"), TransitionConfig.fadeDim())
+                        Component.translatable("ui_transitions.config.fade_dim"), TransitionConfig.fadeDim())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("界面淡出时，那层变暗遮罩一起变淡，世界随之变亮"),
-                        Component.literal("关掉的话动画中途会有一层灰黑挡着"))
+                .setTooltip(Component.translatable("ui_transitions.config.fade_dim.tip1"),
+                        Component.translatable("ui_transitions.config.fade_dim.tip2"))
                 .setSaveConsumer(TransitionConfig::setFadeDim)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("物品图标淡变"), TransitionConfig.fadeItems())
+                        Component.translatable("ui_transitions.config.fade_items"), TransitionConfig.fadeItems())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("槽内物品图标是否参与淡变；关掉则只有底板与文字在动"))
+                .setTooltip(Component.translatable("ui_transitions.config.fade_items.tip"))
                 .setSaveConsumer(TransitionConfig::setFadeItems)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("文字淡变"), TransitionConfig.fadeText())
+                        Component.translatable("ui_transitions.config.fade_text"), TransitionConfig.fadeText())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("界面标题等文字是否参与淡变"))
+                .setTooltip(Component.translatable("ui_transitions.config.fade_text.tip"))
                 .setSaveConsumer(TransitionConfig::setFadeText)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("关闭动画期间允许转视角"), TransitionConfig.allowLookDuringClose())
+                        Component.translatable("ui_transitions.config.look_during_close"), TransitionConfig.allowLookDuringClose())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("关闭界面时鼠标立刻交还给游戏，可以马上转视角。"),
-                        Component.literal("关掉 = 关闭动画播完前鼠标一直被界面占用"))
+                .setTooltip(Component.translatable("ui_transitions.config.look_during_close.tip1"),
+                        Component.translatable("ui_transitions.config.look_during_close.tip2"))
                 .setSaveConsumer(TransitionConfig::setAllowLookDuringClose)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("容器底板跟随动画"), TransitionConfig.animatePanel())
+                        Component.translatable("ui_transitions.config.animate_panel"), TransitionConfig.animatePanel())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("背包/箱子的整块底板与槽位背景是否一起滑动淡变。"),
-                        Component.literal("关闭 = 只有槽内的物品与文字动，底板直接出现"))
+                .setTooltip(Component.translatable("ui_transitions.config.animate_panel.tip1"),
+                        Component.translatable("ui_transitions.config.animate_panel.tip2"))
                 .setSaveConsumer(TransitionConfig::setAnimatePanel)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("变暗遮罩跟随位移"), TransitionConfig.animateDim())
+                        Component.translatable("ui_transitions.config.animate_dim"), TransitionConfig.animateDim())
                 .setDefaultValue(false)
-                .setTooltip(Component.literal("那层变暗遮罩是否也跟着上下滑。默认关闭（保持静止），贴近基岩版观感"))
+                .setTooltip(Component.translatable("ui_transitions.config.animate_dim.tip"))
                 .setSaveConsumer(TransitionConfig::setAnimateDim)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("音效字幕跟随动画"), TransitionConfig.animateSubtitles())
+                        Component.translatable("ui_transitions.config.animate_subtitles"), TransitionConfig.animateSubtitles())
                 .setDefaultValue(false)
-                .setTooltip(Component.literal("字幕是在背景层里顺带绘制的，默认不参与动画（否则打开背包时字幕会跟着动）"))
+                .setTooltip(Component.translatable("ui_transitions.config.animate_subtitles.tip"))
                 .setSaveConsumer(TransitionConfig::setAnimateSubtitles)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("所有界面都加动画"), TransitionConfig.animateAllScreens())
+                        Component.translatable("ui_transitions.config.animate_all"), TransitionConfig.animateAllScreens())
                 .setDefaultValue(false)
-                .setTooltip(Component.literal("默认只对容器界面 + 下面列出的额外界面生效；"),
-                        Component.literal("打开后标题界面、选项界面等所有界面都会有过渡动画"))
+                .setTooltip(Component.translatable("ui_transitions.config.animate_all.tip1"),
+                        Component.translatable("ui_transitions.config.animate_all.tip2"))
                 .setSaveConsumer(TransitionConfig::setAnimateAllScreens)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("装了 JEI 类模组时只淡变不位移"), TransitionConfig.overlayModsFadeOnly())
+                        Component.translatable("ui_transitions.config.overlay_fade_only"), TransitionConfig.overlayModsFadeOnly())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("JEI / EMI / REI 会在容器界面上叠一层固定位置的按钮，"),
-                        Component.literal("它们和底板在同一条渲染层里，只能靠整个界面不滑动来让它们留在原地。"),
-                        Component.literal("关掉 = 恢复滑动（那些按钮会跟着滑）"))
+                .setTooltip(Component.translatable("ui_transitions.config.overlay_fade_only.tip1"),
+                        Component.translatable("ui_transitions.config.overlay_fade_only.tip2"),
+                        Component.translatable("ui_transitions.config.overlay_fade_only.tip3"))
                 .setSaveConsumer(TransitionConfig::setOverlayModsFadeOnly)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("分类标签切换动画（创造模式）"), TransitionConfig.animateTabSwitch())
+                        Component.translatable("ui_transitions.config.tab_switch"), TransitionConfig.animateTabSwitch())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("点创造模式物品栏的分类标签时，物品区原地淡入（不做位移）。"),
-                        Component.literal("底板、标签栏、快捷栏、玩家小模型都保持不动"))
+                .setTooltip(Component.translatable("ui_transitions.config.tab_switch.tip1"),
+                        Component.translatable("ui_transitions.config.tab_switch.tip2"))
                 .setSaveConsumer(TransitionConfig::setAnimateTabSwitch)
                 .build());
 
-        layers.addEntry(entries.startIntSlider(Component.literal("标签切换时长（毫秒）"),
+        layers.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.tab_switch_ms"),
                         TransitionConfig.tabSwitchMs(),
                         TransitionConfig.MIN_TAB_SWITCH_MS, TransitionConfig.MAX_TAB_SWITCH_MS)
                 .setDefaultValue(TransitionConfig.DEFAULT_TAB_SWITCH_MS)
-                .setTooltip(Component.literal("点分类标签 / 滚动物品列表时的原地淡变时长，默认 600。"),
-                        Component.literal("这类淡变没有位移，太短会显得一闪而过"))
+                .setTooltip(Component.translatable("ui_transitions.config.tab_switch_ms.tip1"),
+                        Component.translatable("ui_transitions.config.tab_switch_ms.tip2"))
                 .setSaveConsumer(TransitionConfig::setTabSwitchMs)
                 .build());
 
-        layers.addEntry(entries.startIntSlider(Component.literal("滚动渐变带高度（像素）"),
+        layers.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.scroll_band"),
                         TransitionConfig.scrollFadeBand(), 16, 300)
                 .setDefaultValue(200)
-                .setTooltip(Component.literal("滚动物品列表时，多高范围内的格子参与逐格渐变。"),
-                        Component.literal("越大越明显；只想轻微提示就往小调"))
+                .setTooltip(Component.translatable("ui_transitions.config.scroll_band.tip1"),
+                        Component.translatable("ui_transitions.config.scroll_band.tip2"))
                 .setSaveConsumer(TransitionConfig::setScrollFadeBand)
                 .build());
 
-        layers.addEntry(entries.startIntSlider(Component.literal("滚动渐变最低透明度（%）"),
+        layers.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.scroll_min"),
                         TransitionConfig.scrollFadeMin(), 0, 100)
                 .setDefaultValue(0)
-                .setTooltip(Component.literal("滚动时刚进入视野那一侧最淡到什么程度。"),
-                        Component.literal("0 = 完全淡出（默认）；调高会含蓄一些"))
+                .setTooltip(Component.translatable("ui_transitions.config.scroll_min.tip1"),
+                        Component.translatable("ui_transitions.config.scroll_min.tip2"))
                 .setSaveConsumer(TransitionConfig::setScrollFadeMin)
                 .build());
 
         layers.addEntry(entries.startBooleanToggle(
-                        Component.literal("同类界面切换也做动画"), TransitionConfig.animateSameTypeSwitch())
+                        Component.translatable("ui_transitions.config.same_type"), TransitionConfig.animateSameTypeSwitch())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("创造模式物品栏切换分类标签、配方书翻页这类同界面换页，"),
-                        Component.literal("默认也会做过渡动画；关掉则直接切换"))
+                .setTooltip(Component.translatable("ui_transitions.config.same_type.tip1"),
+                        Component.translatable("ui_transitions.config.same_type.tip2"))
                 .setSaveConsumer(TransitionConfig::setAnimateSameTypeSwitch)
                 .build());
 
         layers.addEntry(entries.startStrList(
-                        Component.literal("额外适配的界面（列表）"),
+                        Component.translatable("ui_transitions.config.extra_screens"),
                         splitScreens(TransitionConfig.extraScreens()))
                 .setDefaultValue(splitScreens(TransitionConfig.DEFAULT_EXTRA_SCREENS))
                 .setExpanded(true)
-                .setTooltip(Component.literal("这些界面即使不是容器界面也会有过渡动画，按前缀匹配。"),
-                        Component.literal("点 + 添加一行，填类名或包名；默认已含 JEI / EMI / REI"))
+                .setTooltip(Component.translatable("ui_transitions.config.extra_screens.tip1"),
+                        Component.translatable("ui_transitions.config.extra_screens.tip2"))
                 .setSaveConsumer(list -> TransitionConfig.setExtraScreens(joinScreens(list)))
                 .build());
 
         // ============================================================ 传送门 / 维度切换
-        ConfigCategory portal = builder.getOrCreateCategory(Component.literal("传送门加载"));
+        ConfigCategory portal = builder.getOrCreateCategory(Component.translatable("ui_transitions.config.category.portal"));
 
-        portal.addEntry(entries.startIntSlider(Component.literal("加载动画时长（毫秒）"),
+        portal.addEntry(entries.startIntSlider(Component.translatable("ui_transitions.config.portal_duration"),
                         TransitionConfig.portalDurationMs(),
                         TransitionConfig.MIN_PORTAL_DURATION_MS, TransitionConfig.MAX_PORTAL_DURATION_MS)
                 .setDefaultValue(TransitionConfig.DEFAULT_PORTAL_DURATION_MS)
-                .setTooltip(Component.literal("穿过末地传送门 / 地狱门时那一下「正在下载地形」的过渡时长，"),
-                        Component.literal("默认 1500 —— 比普通界面长，免得一闪而过。"),
-                        Component.literal("这一项对渐入与渐出同时生效"))
+                .setTooltip(Component.translatable("ui_transitions.config.portal_duration.tip1"),
+                        Component.translatable("ui_transitions.config.portal_duration.tip2"),
+                        Component.translatable("ui_transitions.config.portal_duration.tip3"))
                 .setSaveConsumer(TransitionConfig::setPortalDurationMs)
                 .build());
 
         
-        portal.addEntry(entries.startTextDescription(Component.literal(
-                "覆盖的界面：LevelLoadingScreen（26.3 里「正在下载地形」就是它，\n"
-                        + "首次进世界与维度切换都走这个界面）以及 ProgressScreen。")).build());
+        portal.addEntry(entries.startTextDescription(
+                Component.translatable("ui_transitions.config.portal_scope")).build());
 
         // ============================================================ 方向
-        ConfigCategory direction = builder.getOrCreateCategory(Component.literal("方向"));
+        ConfigCategory direction = builder.getOrCreateCategory(Component.translatable("ui_transitions.config.category.direction"));
 
         direction.addEntry(entries.startBooleanToggle(
-                        Component.literal("打开时自下而上滑入"), TransitionConfig.openFromBottom())
+                        Component.translatable("ui_transitions.config.open_from_bottom"), TransitionConfig.openFromBottom())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("关闭则改为自上而下滑入"))
+                .setTooltip(Component.translatable("ui_transitions.config.open_from_bottom.tip"))
                 .setSaveConsumer(value -> {
                     if (value != TransitionConfig.openFromBottom()) {
                         TransitionConfig.toggleOpenDirection();
@@ -310,9 +318,9 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
         direction.addEntry(entries.startBooleanToggle(
-                        Component.literal("关闭时向下滑出"), TransitionConfig.closeToBottom())
+                        Component.translatable("ui_transitions.config.close_to_bottom"), TransitionConfig.closeToBottom())
                 .setDefaultValue(true)
-                .setTooltip(Component.literal("关闭则改为向上滑出"))
+                .setTooltip(Component.translatable("ui_transitions.config.close_to_bottom.tip"))
                 .setSaveConsumer(value -> {
                     if (value != TransitionConfig.closeToBottom()) {
                         TransitionConfig.toggleCloseDirection();
@@ -320,37 +328,162 @@ public final class UiTransitionsConfigScreen {
                 })
                 .build());
 
+        // ============================================================ 按界面分类
+        buildCategoryEntries(builder, entries);
+
         // ============================================================ 界面开关
-        ConfigCategory perScreen = builder.getOrCreateCategory(Component.literal("界面开关"));
+        ConfigCategory perScreen = builder.getOrCreateCategory(Component.translatable("ui_transitions.config.category.screens"));
 
         perScreen.addEntry(entries.startStrList(
-                        Component.literal("不做动画的界面（列表）"),
+                        Component.translatable("ui_transitions.config.excluded_screens"),
                         splitScreens(TransitionConfig.excludedScreens()))
                 .setDefaultValue(new java.util.ArrayList<String>())   // 必须可变：Cloth 会在默认值上增删
                 .setExpanded(true)
-                .setTooltip(Component.literal("想让哪个界面恢复成原版，就在这里加一行它的类名或包名。"),
-                        Component.literal("按前缀匹配：写 com.example 就能整包关掉，"),
-                        Component.literal("写完整类名就只关那一个界面。"),
-                        Component.literal("下面列出了最近见过的界面类名，照着填即可。"))
+                .setTooltip(Component.translatable("ui_transitions.config.excluded_screens.tip1"),
+                        Component.translatable("ui_transitions.config.excluded_screens.tip2"),
+                        Component.translatable("ui_transitions.config.excluded_screens.tip3"),
+                        Component.translatable("ui_transitions.config.excluded_screens.tip4"))
                 .setSaveConsumer(list -> TransitionConfig.setExcludedScreens(joinScreens(list)))
                 .build());
 
+        // 类名又长又难拼，而这个模组自己知道运行期见过哪些界面 ——
+        // 所以另配了一个**双列表界面**（在上一层的入口页里），点一下就把界面搬进/搬出排除列表。
+        //
+        // 这里只放一段说明、放不了一个能点的按钮：Cloth 的 ConfigEntryBuilder 没有按钮条目
+        // （只有 startStrList/startSubCategory/startTextDescription 这些）。而"自绘条目 + 自己处理点击"
+        // 这条路**已经栽过一次** —— 渲染正常、直接派发点击也能开，但真实鼠标点击传不到它那儿
+        // （详见 UiTransitionsHubScreen 的注释）。所以入口一律用原版按钮，摆在入口页上。
         perScreen.addEntry(entries.startTextDescription(
-                Component.literal("最近见过的界面（可直接复制到上面）：\n"
-                        + seenScreenHint())).build());
+                Component.translatable("ui_transitions.config.seen_screens.header")
+                        .append("\n").append(seenScreenHint())).build());
 
-        perScreen.addEntry(entries.startTextDescription(Component.literal(
-                "提示：只有装了动画的界面才会出现在这个列表里；"
-                        + "打开过某个界面之后回到这里，它就会被记下来。")).build());
+        perScreen.addEntry(entries.startTextDescription(Component.translatable("ui_transitions.config.seen_screens.tip")).build());
 
         // ============================================================ 兼容性
-        ConfigCategory compat = builder.getOrCreateCategory(Component.literal("兼容性"));
+        ConfigCategory compat = builder.getOrCreateCategory(Component.translatable("ui_transitions.config.category.compat"));
 
-        compat.addEntry(entries.startTextDescription(Component.literal(
-                        "提示：所有选项都会写入 config/ui-transitions.properties，改动立刻保存。"))
+        compat.addEntry(entries.startTextDescription(Component.translatable("ui_transitions.config.saved_tip"))
                 .build());
 
         return builder.build();
+    }
+
+    /**
+     * 「按界面分类」这一页：聊天栏 / 创造物品栏 / 游戏菜单 / 容器界面 / 传送门 / 其它。
+     *
+     * 每一类可以配**自己的曲线**和**自己的一对时长**；不配就是"跟随全局"。
+     * 这一页是"分类 = 数据"的直接体现：加一个分类只需要往 {@code UiCategory} 里加一项，
+     * 这里会自动多出一块，**不需要新增任何动画代码** —— 这正是底层架构文档 §5.2 的验收标准
+     * 在分类维度上的样子。
+     *
+     * 时长用**文本框**而不是滑块，是为了能表达第三种状态："跟随全局"。
+     * 滑块只有数值，没法区分"没配过"与"配成了和全局一样"，界面上就永远显示不出"跟随全局"。
+     */
+    private static void buildCategoryEntries(ConfigBuilder builder, ConfigEntryBuilder entries) {
+        ConfigCategory categories = builder.getOrCreateCategory(
+                Component.translatable("ui_transitions.config.category.by_screen"));
+
+        categories.addEntry(entries.startTextDescription(
+                Component.translatable("ui_transitions.config.by_screen.intro")).build());
+
+        for (TransitionConfig.UiCategory category : TransitionConfig.UiCategory.values()) {
+            var group = entries.startSubCategory(Component.translatable(category.labelKey()));
+            group.setExpanded(false);       // 默认折叠：六类全展开会把这一页拉得很长
+
+            group.add(entries.startStrField(
+                            Component.translatable("ui_transitions.config.category.curve"),
+                            TransitionConfig.categoryCurveId(category))
+                    .setDefaultValue(TransitionConfig.Curve.FOLLOW_ID)
+                    .setErrorSupplier(UiTransitionsConfigScreen::categoryCurveError)
+                    .setTooltip(Component.translatable("ui_transitions.config.category.curve.tip1"),
+                            Component.translatable("ui_transitions.config.category.curve.tip2"),
+                            Component.translatable("ui_transitions.config.category.curve.tip3"))
+                    .setSaveConsumer(value -> TransitionConfig.setCategoryCurve(category, value))
+                    .build());
+
+            group.add(entries.startStrField(
+                            Component.translatable("ui_transitions.config.category.open_ms"),
+                            durationText(TransitionConfig.openDurationFor(category),
+                                    TransitionConfig.hasOwnDuration(category, false)))
+                    .setDefaultValue(FOLLOW_TEXT)
+                    .setErrorSupplier(UiTransitionsConfigScreen::durationError)
+                    .setTooltip(Component.translatable("ui_transitions.config.category.ms.tip1"),
+                            Component.translatable("ui_transitions.config.category.ms.tip2"))
+                    .setSaveConsumer(value -> TransitionConfig.setCategoryDuration(
+                            category, false, parseDuration(value)))
+                    .build());
+
+            group.add(entries.startStrField(
+                            Component.translatable("ui_transitions.config.category.close_ms"),
+                            durationText(TransitionConfig.closeDurationFor(category),
+                                    TransitionConfig.hasOwnDuration(category, true)))
+                    .setDefaultValue(FOLLOW_TEXT)
+                    .setErrorSupplier(UiTransitionsConfigScreen::durationError)
+                    .setTooltip(Component.translatable("ui_transitions.config.category.ms.tip1"),
+                            Component.translatable("ui_transitions.config.category.ms.tip2"))
+                    .setSaveConsumer(value -> TransitionConfig.setCategoryDuration(
+                            category, true, parseDuration(value)))
+                    .build());
+
+            categories.addEntry(group.build());
+        }
+    }
+
+    /** 时长的"跟随全局"写法 */
+    static final String FOLLOW_TEXT = "default";
+
+    /** 当前时长显示成什么：跟随全局就显示 default（后面附带全局值，方便对照） */
+    private static String durationText(int value, boolean hasOwn) {
+        return hasOwn ? Integer.toString(value) : FOLLOW_TEXT;
+    }
+
+    /** "default" / 空 → 0（表示回到跟随全局）；其它按整数解析，非法值也回退成跟随 */
+    private static int parseDuration(String raw) {
+        if (raw == null || raw.isBlank() || FOLLOW_TEXT.equalsIgnoreCase(raw.trim())) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /** 时长文本框的校验：default 或合法范围内的整数 */
+    private static java.util.Optional<Component> durationError(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if (value.isEmpty() || FOLLOW_TEXT.equalsIgnoreCase(value)) {
+            return java.util.Optional.empty();
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed >= TransitionConfig.MIN_DURATION_MS && parsed <= TransitionConfig.MAX_DURATION_MS) {
+                return java.util.Optional.empty();
+            }
+        } catch (NumberFormatException ignored) {
+            // 落到下面统一报错
+        }
+        return java.util.Optional.of(Component.translatable("ui_transitions.config.category.ms_error",
+                FOLLOW_TEXT, TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS));
+    }
+
+    /** 分类曲线文本框的校验：比通用曲线多允许一个 default（= 跟随全局） */
+    private static java.util.Optional<Component> categoryCurveError(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (TransitionConfig.Curve.FOLLOW_ID.equals(normalized)
+                || TransitionConfig.Curve.byId(value).id().equals(normalized)) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(Component.translatable("ui_transitions.config.curve_error",
+                String.join(" / ", allCategoryCurveIds())));
+    }
+
+    /** 可选曲线 id，前面加上 default（跟随全局），供提示用 */
+    private static java.util.List<String> allCategoryCurveIds() {
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        ids.add(TransitionConfig.Curve.FOLLOW_ID);
+        ids.addAll(java.util.Arrays.asList(TransitionConfig.Curve.ids()));
+        return ids;
     }
 
     /** 曲线文本框的校验：值必须是已知曲线 id */
@@ -359,55 +492,39 @@ public final class UiTransitionsConfigScreen {
         if (TransitionConfig.Curve.byId(value).id().equals(normalized)) {
             return java.util.Optional.empty();
         }
-        return java.util.Optional.of(Component.literal(
-                "可用值: " + String.join(" / ", TransitionConfig.Curve.ids())));
+        return java.util.Optional.of(Component.translatable("ui_transitions.config.curve_error",
+                        String.join(" / ", TransitionConfig.Curve.ids())));
     }
 
 
-    /** "a,b,c" -> ["a","b","c"]（配置文件里是逗号分隔的字符串，界面用列表更好操作） */
+    /**
+     * "a,b,c" -> ["a","b","c"]。
+     *
+     * 实现已挪到 {@link TransitionConfig#splitList}：排除列表现在还有一个**双列表界面**，
+     * 两边必须用同一套切分规则。各写一份的话，只要 trim / 忽略空项的做法有一点不同，
+     * 就会出现"界面上加进去了、配置里其实没写"这类很难查的问题。
+     */
     private static java.util.List<String> splitScreens(String value) {
-        java.util.List<String> out = new java.util.ArrayList<>();
-        if (value != null) {
-            for (String part : value.split(",")) {
-                String trimmed = part.trim();
-                if (!trimmed.isEmpty()) {
-                    out.add(trimmed);
-                }
-            }
-        }
-        return out;
+        return TransitionConfig.splitList(value);
     }
 
     /** ["a","b"] -> "a,b" */
     private static String joinScreens(java.util.List<String> list) {
-        if (list == null) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        for (String item : list) {
-            String trimmed = item == null ? "" : item.trim();
-            if (trimmed.isEmpty()) {
-                continue;
-            }
-            if (sb.length() > 0) {
-                sb.append(',');
-            }
-            sb.append(trimmed);
-        }
-        return sb.toString();
+        return TransitionConfig.joinList(list);
     }
 
     /** 把运行期记录下来的界面类名拼成一段提示文字 */
     private static String seenScreenHint() {
         java.util.List<String> seen = TransitionConfig.seenScreens();
         if (seen.isEmpty()) {
-            return "（还没记录到：先打开几个界面，再回来这里）";
+            return Component.translatable("ui_transitions.config.seen_screens.empty").getString();
         }
         StringBuilder sb = new StringBuilder();
         int shown = 0;
         for (String name : seen) {
             if (shown >= 14) {
-                sb.append("… 共 ").append(seen.size()).append(" 个");
+                sb.append(Component.translatable("ui_transitions.config.seen_screens.more",
+                        seen.size()).getString());
                 break;
             }
             if (shown > 0) {

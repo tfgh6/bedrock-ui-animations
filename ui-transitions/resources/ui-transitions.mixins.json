@@ -2,7 +2,7 @@
   "required": false,
   "minVersion": "0.8",
   "package": "com.uitransitions.mixin",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "JAVA_25",
   "client": [
     "ScreenMixin",
     "GuiMixin",
@@ -18,7 +18,9 @@
     "SlotFadeMixin",
     "HotbarTabExcludeMixin",
     "HudSubtitleMixin",
-    "HudVeilMixin"
+    "HudVeilMixin",
+    "ChatFadeMixin",
+    "ChatFadeNoteMixin"
   ],
   "injectors": {
     "defaultRequire": 0

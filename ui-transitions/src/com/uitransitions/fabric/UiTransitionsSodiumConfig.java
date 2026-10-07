@@ -34,8 +34,14 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         return Identifier.fromNamespaceAndPath(MOD_ID, path);
     }
 
+    /** 原样文本（曲线名之类不需要翻译的） */
     private static Component tr(String text) {
         return Component.literal(text);
+    }
+
+    /** 翻译键；键名统一加 ui_transitions. 前缀 */
+    private static Component tKey(String key) {
+        return Component.translatable("ui_transitions." + key);
     }
 
     private static String curveName(int index) {
@@ -70,9 +76,8 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         ModOptionsBuilder mod = builder.registerOwnModOptions();
 
         // ---------------------------------------------------------- 动画
-        OptionGroupBuilder anim = builder.createOptionGroup().setName(tr("动画"));
-        anim.addOption(bool(builder, "enabled", "启用动画",
-                "总开关。关闭后完全等同原版界面", true,
+        OptionGroupBuilder anim = builder.createOptionGroup().setName(tKey("sodium.group.animation"));
+        anim.addOption(bool(builder, "enabled", true,
                 TransitionConfig::setEnabled));
 
         // 曲线用整数选项（下标对应 Curve.ids()）：Sodium 的枚举选项要求枚举实现它的 TextProvider，
@@ -80,9 +85,8 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         // 范围跟着 Curve.ids() 走，加了 custom 之后不会再出现"下标越界"。
         String[] curveIds = TransitionConfig.Curve.ids();
         anim.addOption(builder.createIntegerOption(id("curve"))
-                .setName(tr("缓动曲线"))
-                .setTooltip(tr("0 linear / 1 sine / 2 cubic（默认）/ 3 quart / 4 quint / 5 expo / "
-                        + "6 circ / 7 back / 8 custom（自定义，去 Cloth 配置界面的曲线编辑器里调）"))
+                .setName(tKey("sodium.curve"))
+                .setTooltip(tKey("sodium.curve.tip"))
                 .setDefaultValue(2)
                 .setRange(0, curveIds.length - 1, 1)
                 .setValueFormatter(value -> tr(curveName(value)))
@@ -90,106 +94,81 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
                         () -> curveIndex(TransitionConfig.curve()))
                 .setStorageHandler(TransitionConfig::save));
 
-        anim.addOption(intOption(builder, "duration_ms", "动画时长",
-                "渐入与渐出一起设定的快捷项；默认 500 毫秒。要分开调请用 Cloth Config 的配置界面",
-                TransitionConfig.DEFAULT_DURATION_MS,
+        anim.addOption(intOption(builder, "duration_ms", TransitionConfig.DEFAULT_DURATION_MS,
                 TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS, 10,
                 TransitionConfig::setDurationMsBoth,
-                value -> tr(value + " 毫秒")));
+                value -> Component.translatable("ui_transitions.unit.ms", value)));
 
-        anim.addOption(intOption(builder, "offset", "位移距离", "界面滑动多少像素，默认 120；0 = 只淡入淡出",
-                Math.round(TransitionConfig.DEFAULT_OFFSET), 0, 400, 1,
+        anim.addOption(intOption(builder, "offset", Math.round(TransitionConfig.DEFAULT_OFFSET), 0, 400, 1,
                 value -> TransitionConfig.setOffset(value),
-                value -> tr(value + " 像素")));
+                value -> Component.translatable("ui_transitions.unit.px", value)));
 
-        anim.addOption(intOption(builder, "jelly", "果冻回弹强度", "打开时冲过静止位置再回落的弹性手感，0 = 关闭（默认）",
-                0, 0, 100, 5,
+        anim.addOption(intOption(builder, "jelly", 0, 0, 100, 5,
                 value -> TransitionConfig.setJelly(value / 100.0F),
                 value -> tr(value + "%")));
 
         // ---------------------------------------------------------- 参与动画的部分
-        OptionGroupBuilder layers = builder.createOptionGroup().setName(tr("参与动画的部分"));
-        layers.addOption(bool(builder, "animate_panel", "容器底板跟随动画",
-                "背包/箱子的整块底板与槽位背景是否一起滑动淡变", true,
+        OptionGroupBuilder layers = builder.createOptionGroup().setName(tKey("sodium.group.layers"));
+        layers.addOption(bool(builder, "animate_panel", true,
                 TransitionConfig::setAnimatePanel));
-        layers.addOption(bool(builder, "animate_dim", "变暗遮罩跟随位移",
-                "那层变暗遮罩是否也跟着上下滑。默认关闭（静止）", false,
+        layers.addOption(bool(builder, "animate_dim", false,
                 TransitionConfig::setAnimateDim));
-        layers.addOption(bool(builder, "animate_subtitles", "音效字幕跟随动画",
-                "字幕在背景层里顺带绘制，默认不参与动画（否则打开背包时字幕会跟着动）", false,
+        layers.addOption(bool(builder, "animate_subtitles", false,
                 TransitionConfig::setAnimateSubtitles));
-        layers.addOption(bool(builder, "stagger_close", "关闭时内容提前淡出",
-                "关闭动画里物品与文字比底板略早结束淡出，避免出现空格子", true,
+        layers.addOption(bool(builder, "stagger_close", true,
                 TransitionConfig::setStaggerClose));
-        layers.addOption(bool(builder, "animate_tab_switch", "分类标签切换动画",
-                "点创造模式物品栏的分类标签时，物品区原地淡入（底板、标签栏、快捷栏都不动）", true,
+        layers.addOption(bool(builder, "animate_tab_switch", true,
                 TransitionConfig::setAnimateTabSwitch));
-        layers.addOption(intOption(builder, "tab_switch_ms", "标签切换时长",
-                "点分类标签 / 滚动物品列表时的原地淡变时长；默认 600 毫秒",
-                TransitionConfig.DEFAULT_TAB_SWITCH_MS,
+        layers.addOption(intOption(builder, "tab_switch_ms", TransitionConfig.DEFAULT_TAB_SWITCH_MS,
                 TransitionConfig.MIN_TAB_SWITCH_MS, TransitionConfig.MAX_TAB_SWITCH_MS, 10,
                 TransitionConfig::setTabSwitchMs,
-                value -> tr(value + " 毫秒")));
-        layers.addOption(intOption(builder, "scroll_fade_band", "滚动渐变带高度",
-                "滚动物品列表时，多高范围内的格子参与逐格渐变；越大越明显", 200, 16, 300, 2,
+                value -> Component.translatable("ui_transitions.unit.ms", value)));
+        layers.addOption(intOption(builder, "scroll_fade_band", 200, 16, 300, 2,
                 TransitionConfig::setScrollFadeBand,
-                value -> tr(value + " 像素")));
-        layers.addOption(intOption(builder, "scroll_fade_min", "滚动渐变最低透明度",
-                "滚动时刚进入视野那一侧最淡到什么程度（%）；0 = 完全淡出", 0, 0, 100, 5,
+                value -> Component.translatable("ui_transitions.unit.px", value)));
+        layers.addOption(intOption(builder, "scroll_fade_min", 0, 0, 100, 5,
                 TransitionConfig::setScrollFadeMin,
                 value -> tr(value + "%")));
-        layers.addOption(intOption(builder, "portal_duration_ms", "传送门加载时长",
-                "穿末地门 / 地狱门时加载界面的过渡时长；默认 1500 毫秒，比普通界面长",
-                TransitionConfig.DEFAULT_PORTAL_DURATION_MS,
+        layers.addOption(intOption(builder, "portal_duration_ms", TransitionConfig.DEFAULT_PORTAL_DURATION_MS,
                 TransitionConfig.MIN_PORTAL_DURATION_MS, TransitionConfig.MAX_PORTAL_DURATION_MS, 50,
                 TransitionConfig::setPortalDurationMs,
-                value -> tr(value + " 毫秒")));
+                value -> Component.translatable("ui_transitions.unit.ms", value)));
         
         // 默认值与 TransitionConfig.animateSameTypeSwitch 一致：默认是**做**动画的
-        layers.addOption(bool(builder, "animate_same_type_switch", "同类界面切换也做动画",
-                "创造模式分类标签、配方书翻页这类同界面换页是否也做过渡动画（默认做）", true,
+        layers.addOption(bool(builder, "animate_same_type_switch", true,
                 TransitionConfig::setAnimateSameTypeSwitch));
-        layers.addOption(bool(builder, "open_from_bottom", "打开时自下而上滑入",
-                "关掉 = 改为自上而下滑入", true,
+        layers.addOption(bool(builder, "open_from_bottom", true,
                 value -> {
                     if (value != TransitionConfig.openFromBottom()) {
                         TransitionConfig.toggleOpenDirection();
                     }
                 }));
-        layers.addOption(bool(builder, "close_to_bottom", "关闭时向下滑出",
-                "关掉 = 改为向上滑出", true,
+        layers.addOption(bool(builder, "close_to_bottom", true,
                 value -> {
                     if (value != TransitionConfig.closeToBottom()) {
                         TransitionConfig.toggleCloseDirection();
                     }
                 }));
-        layers.addOption(bool(builder, "allow_look_during_close", "关闭动画期间允许转视角",
-                "关闭界面时鼠标立刻交还给游戏，可以马上转视角（默认开）", true,
+        layers.addOption(bool(builder, "allow_look_during_close", true,
                 TransitionConfig::setAllowLookDuringClose));
-        layers.addOption(bool(builder, "overlay_mods_fade_only", "装了 JEI 类模组时只淡变不位移",
-                "JEI/EMI/REI 的固定按钮和底板在同一条渲染层里，只能靠整个界面不滑来让它们留在原地", true,
+        layers.addOption(bool(builder, "overlay_mods_fade_only", true,
                 TransitionConfig::setOverlayModsFadeOnly));
-        layers.addOption(bool(builder, "animate_all_screens", "所有界面都加动画",
-                "默认只对容器界面与额外列出的界面生效", false,
+        layers.addOption(bool(builder, "animate_all_screens", false,
                 TransitionConfig::setAnimateAllScreens));
 
         // ---------------------------------------------------------- 淡入淡出细节
-        OptionGroupBuilder fadeGroup = builder.createOptionGroup().setName(tr("淡入淡出细节"));
-        fadeGroup.addOption(bool(builder, "fade", "逐元素淡入淡出",
-                "总开关。关闭后只滑动、不改变透明度", true,
+        OptionGroupBuilder fadeGroup = builder.createOptionGroup().setName(tKey("sodium.group.fade"));
+        fadeGroup.addOption(bool(builder, "fade", true,
                 TransitionConfig::setFade));
-        fadeGroup.addOption(bool(builder, "fade_dim", "遮罩随动画一起淡出",
-                "界面淡出时那层变暗遮罩也一起变淡，世界随之变亮，动画中途不会偏黑", true,
+        fadeGroup.addOption(bool(builder, "fade_dim", true,
                 TransitionConfig::setFadeDim));
-        fadeGroup.addOption(bool(builder, "fade_items", "物品图标淡入淡出",
-                "关掉则物品直接出现，但仍随底板滑动", true,
+        fadeGroup.addOption(bool(builder, "fade_items", true,
                 TransitionConfig::setFadeItems));
-        fadeGroup.addOption(bool(builder, "fade_text", "文字淡入淡出",
-                "标题、数量等文字是否一起淡变", true,
+        fadeGroup.addOption(bool(builder, "fade_text", true,
                 TransitionConfig::setFadeText));
 
         // ---------------------------------------------------------- 组装页面
-        OptionPageBuilder page = builder.createOptionPage().setName(tr("界面过渡动画"));
+        OptionPageBuilder page = builder.createOptionPage().setName(tKey("sodium.group.title"));
         page.addOptionGroup(anim);
         page.addOptionGroup(layers);
         page.addOptionGroup(fadeGroup);
@@ -258,24 +237,24 @@ public final class UiTransitionsSodiumConfig implements ConfigEntryPoint {
         return 0;
     }
 
-    private static BooleanOptionBuilder bool(ConfigBuilder builder, String key, String name, String tooltip,
+    private static BooleanOptionBuilder bool(ConfigBuilder builder, String key,
                                              boolean defaultValue,
                                              java.util.function.Consumer<Boolean> setter) {
         return builder.createBooleanOption(id(key))
-                .setName(tr(name))
-                .setTooltip(tr(tooltip))
+                .setName(tKey("sodium." + key))
+                .setTooltip(tKey("sodium." + key + ".tip"))
                 .setDefaultValue(defaultValue)
                 .setBinding(setter, () -> boolGetter(key))
                 .setStorageHandler(TransitionConfig::save);
     }
 
-    private static IntegerOptionBuilder intOption(ConfigBuilder builder, String key, String name, String tooltip,
+    private static IntegerOptionBuilder intOption(ConfigBuilder builder, String key,
                                                   int defaultValue, int min, int max, int step,
                                                   java.util.function.Consumer<Integer> setter,
                                                   java.util.function.IntFunction<Component> formatter) {
         return builder.createIntegerOption(id(key))
-                .setName(tr(name))
-                .setTooltip(tr(tooltip))
+                .setName(tKey("sodium." + key))
+                .setTooltip(tKey("sodium." + key + ".tip"))
                 .setDefaultValue(defaultValue)
                 .setRange(min, max, step)
                 .setValueFormatter(value -> formatter.apply(value))

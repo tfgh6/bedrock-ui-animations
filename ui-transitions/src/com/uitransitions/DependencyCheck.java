@@ -36,28 +36,37 @@ public final class DependencyCheck {
      *
      * 刻意把"你在哪个加载器上、缺的是什么、去哪装、不想装怎么办"四件事都写全 ——
      * 崩溃界面是用户唯一能看到的信息，写不清楚等于没写。
+     *
+     * 这段发生在资源加载之前，**用不上语言文件**，所以直接写成中英双语：
+     * 无论玩家的游戏语言是什么，两段里总有一段是他看得懂的。
      */
     public static String missingMessage(String loaderName, String depName,
                                         String[] ids, String url) {
         String separator = "=".repeat(64);
+        String idList = String.join(" / ", ids);
         return String.join("\n",
                 "",
                 separator,
                 " Bedrock UI Animations 无法启动：缺少必需的依赖 " + depName,
+                " Bedrock UI Animations cannot start: missing required dependency " + depName,
                 separator,
-                " 加载器      : " + loaderName,
-                " 需要的 mod  : " + String.join(" 或 ", ids),
-                " 当前状态    : 没有检测到它",
+                " 加载器 / Loader : " + loaderName,
+                " 需要的 mod / Required mod : " + idList,
+                " 当前状态 / Status : 没有检测到它 / not detected",
                 "",
                 " 为什么会这样：本模组的配置界面依赖它，缺少就无法使用，",
                 "               所以这里直接停下，而不是装作没事。",
+                " Why: this mod's config screen is built on it. Instead of silently",
+                "      degrading, we stop here so the reason is obvious.",
                 "",
-                " 怎么解决：",
-                "   1) 安装 " + depName + "（选与你加载器对应的版本）：",
+                " 怎么解决 / How to fix：",
+                "   1) 安装 " + depName + "（选与你加载器对应的版本）",
+                "      Install " + depName + " (pick the build for your loader):",
                 "      " + url,
-                "   2) 装好后重新启动游戏。",
+                "   2) 装好后重新启动游戏 / Then restart the game.",
                 "",
                 " 不想装？那就请删掉 Bedrock UI Animations。",
+                " Do not want it? Then please remove Bedrock UI Animations.",
                 separator);
     }
 

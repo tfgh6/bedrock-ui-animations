@@ -68,6 +68,30 @@ public final class TransitionConfig {
         save();
     }
 
+    // ---------------------------------------------------------------- 聊天栏淡入
+
+    /**
+     * HUD 聊天栏新消息的淡入时长（毫秒）。
+     *
+     * 这是一个**全新的动画**（以前聊天消息是"啪"地直接出现）：它发生在 HUD 上，
+     * 与"哪个界面在开/关"无关，所以单独一条配置、单独计时。
+     * 0 = 关闭（回到原版观感）。
+     */
+    public static final int DEFAULT_CHAT_FADE_MS = 260;
+    public static final int MIN_CHAT_FADE_MS = 0;
+    public static final int MAX_CHAT_FADE_MS = 2000;
+
+    private static volatile int chatFadeMs = DEFAULT_CHAT_FADE_MS;
+
+    public static int chatFadeMs() {
+        return chatFadeMs;
+    }
+
+    public static synchronized void setChatFadeMs(int value) {
+        chatFadeMs = Math.max(MIN_CHAT_FADE_MS, Math.min(MAX_CHAT_FADE_MS, value));
+        save();
+    }
+
     /** 原地淡变（点分类标签 / 滚动）的默认时长与范围 */
     public static final int DEFAULT_TAB_SWITCH_MS = 600;
     public static final int MIN_TAB_SWITCH_MS = 50;
@@ -146,6 +170,12 @@ public final class TransitionConfig {
 
         public static final String CUSTOM_ID = "custom";
 
+        /**
+         * "跟随全局"：按部位的曲线留空时用这个占位，表示"用 openCurve / closeCurve"。
+         * 这样老配置升级后行为完全不变，界面上也能明确显示"跟随全局"。
+         */
+        public static final String FOLLOW_ID = "default";
+
         private static final int KIND_CUSTOM = 100;
 
         public static final Curve LINEAR = new Curve("linear", 0);
@@ -164,15 +194,22 @@ public final class TransitionConfig {
         private final int kind;
         /** 仅自定义曲线非空：x1,y1,x2,y2 */
         private final float[] bezier;
+        /** 仅多点曲线非空：x0,y0,x1,y1,…（x 递增，首尾固定） */
+        private final float[] points;
 
         private Curve(String id, int kind) {
-            this(id, kind, null);
+            this(id, kind, null, null);
         }
 
         private Curve(String id, int kind, float[] bezier) {
+            this(id, kind, bezier, null);
+        }
+
+        private Curve(String id, int kind, float[] bezier, float[] points) {
             this.id = id;
             this.kind = kind;
             this.bezier = bezier;
+            this.points = points;
         }
 
         /** 造一条带控制点的自定义曲线 */
@@ -182,6 +219,274 @@ public final class TransitionConfig {
 
         public String id() {
             return this.id;
+        }
+
+
+        /** 多点曲线的曲线 id 与控制点格式说明 */
+        public static final String MULTI_ID = "multi";
+        private static final int KIND_MULTI = 101;
+
+        /** 多点曲线的点：偶数下标是 x、奇数下标是 y，x 必须递增，首尾固定 (0,0) 与 (1,1) */
+        public static Curve multi(float[] points) {
+            return new Curve(MULTI_ID, KIND_MULTI, null, normalizeMulti(points));
+        }
+
+        /**
+         * 整理多点数组：按 x 排序、去掉越界点、强制首尾为 (0,0)/(1,1)。
+         *
+         * 界面允许用户随便拖，所以这里必须能容错 —— 拖出格、点重复、顺序乱了都要能救回来，
+         * 否则一次误操作就会让曲线算出 NaN。
+         */
+        public static float[] normalizeMulti(float[] raw) {
+            java.util.List<float[]> list = new java.util.ArrayList<>();
+            if (raw != null) {
+                for (int i = 0; i + 1 < raw.length; i += 2) {
+                    float x = Math.max(0.0F, Math.min(1.0F, raw[i]));
+                    float y = Math.max(-0.5F, Math.min(1.5F, raw[i + 1]));
+                    if (x > 0.0001F && x < 0.9999F) {
+                        list.add(new float[] { x, y });
+                    }
+                }
+            }
+            list.sort((a, b) -> Float.compare(a[0], b[0]));
+            // 去掉 x 挨得太近的点：挨太近会让插值区间退化成除以 0
+            java.util.List<float[]> clean = new java.util.ArrayList<>();
+            float lastX = 0.0F;
+            for (float[] p : list) {
+                if (p[0] - lastX < 0.02F) {
+                    continue;
+                }
+                clean.add(p);
+                lastX = p[0];
+            }
+            float[] out = new float[(clean.size() + 2) * 2];
+            out[0] = 0.0F;
+            out[1] = 0.0F;
+            int n = 2;
+            for (float[] p : clean) {
+                out[n++] = p[0];
+                out[n++] = p[1];
+            }
+            out[n++] = 1.0F;
+            out[n] = 1.0F;
+            return out;
+        }
+
+        /** 多点曲线的点（可能为空）；贝塞尔/命名曲线返回 null */
+        public float[] points() {
+            return this.points;
+        }
+
+        /** 相邻点之间用 smoothstep 插值：平滑、单调、不过冲 */
+        private static float multiEase(float[] pts, float x) {
+            if (pts == null || pts.length < 4) {
+                return x;
+            }
+            for (int i = 0; i + 3 < pts.length; i += 2) {
+                float x0 = pts[i];
+                float y0 = pts[i + 1];
+                float x1 = pts[i + 2];
+                float y1 = pts[i + 3];
+                if (x <= x0) {
+                    return y0;
+                }
+                if (x <= x1) {
+                    float span = x1 - x0;
+                    if (span <= 1.0E-5F) {
+                        return y1;
+                    }
+                    float t = (x - x0) / span;
+                    float s = t * t * (3.0F - 2.0F * t);       // smoothstep
+                    return y0 + (y1 - y0) * s;
+                }
+            }
+            return pts[pts.length - 1];
+        }
+
+        /** 多点曲线的点用 "x,y;x,y;…" 存；非法输入回退成空（等价线性） */
+        public static float[] parseMulti(String spec) {
+            if (spec == null || spec.isBlank()) {
+                return new float[0];
+            }
+            java.util.List<Float> vals = new java.util.ArrayList<>();
+            for (String pair : spec.split(";")) {
+                String[] xy = pair.split(",");
+                if (xy.length != 2) {
+                    return new float[0];
+                }
+                try {
+                    vals.add(Float.parseFloat(xy[0].trim()));
+                    vals.add(Float.parseFloat(xy[1].trim()));
+                } catch (NumberFormatException e) {
+                    return new float[0];
+                }
+            }
+            float[] out = new float[vals.size()];
+            for (int i = 0; i < out.length; i++) {
+                out[i] = vals.get(i);
+            }
+            return normalizeMulti(out);
+        }
+
+        // ------------------------------------------------------------- 多点曲线的编辑操作
+        //
+        // 曲线编辑器在图上加点、拖点、双击删点，都需要改这份点集。这些操作**刻意放在
+        // 这里而不是界面类里**：界面类依赖 Minecraft 的 GUI 类型，离线断言跑不动它，
+        // 于是"拖一个点把曲线拖成 NaN 或者点数对不上"这类问题只能靠人眼发现。
+        // 放这里就能被 verify-uit 的真实 JVM 断言覆盖（见 VerifyAdvanced 的多点一节）。
+
+        /** 相邻两个点之间 x 至少要隔这么远：挨太近会让插值区间退化成除以 0 */
+        public static final float MIN_POINT_GAP = 0.02F;
+
+        /**
+         * 内部点的 x 允许范围（首尾固定为 0 与 1，不参与取值）。
+         *
+         * 边界要留出**两个** MIN_POINT_GAP，不能只留一个：插入时会检查"与最近的点是否
+         * 至少隔开 MIN_POINT_GAP"，而首尾那两个点（0 与 1）也在检查范围内。
+         * 早先这里写成 1 个 gap，夹取之后的 x 与端点恰好相距一个 gap，
+         * 于是**贴着左右边缘的点击永远加不进点** —— 明明夹对了，却什么也没发生。
+         */
+        public static final float MIN_POINT_X = MIN_POINT_GAP * 2.0F;
+        public static final float MAX_POINT_X = 1.0F - MIN_POINT_GAP * 2.0F;
+
+        /** 内部点（可拖可删的那些）的点数：总点数减掉固定的首尾 */
+        public static int interiorPointCount(float[] pts) {
+            return pts == null ? 0 : Math.max(0, pts.length / 2 - 2);
+        }
+
+        /** 第 index 个内部点的 x */
+        public static float pointX(float[] pts, int index) {
+            return pts[2 + index * 2];
+        }
+
+        /** 第 index 个内部点的 y */
+        public static float pointY(float[] pts, int index) {
+            return pts[3 + index * 2];
+        }
+
+        /**
+         * 在 x 处加一个点（y 就是该处曲线当前的高度），返回新点集。
+         *
+         * 加不进去就**原样返回**（返回的是传入的同一个数组引用，调用方可以拿
+         * `inserted == before` 判断"这次点击什么也没做"），不抛异常：
+         * 用户点歪了不该让界面崩。
+         */
+        public static float[] insertMulti(float[] pts, float x, float y) {
+            float[] base = normalizeMulti(pts);
+            float cx = Math.max(MIN_POINT_X, Math.min(MAX_POINT_X, x));
+            for (int i = 0; i + 1 < base.length; i += 2) {
+                if (Math.abs(base[i] - cx) < MIN_POINT_GAP) {
+                    return pts;         // 和已有的点挨太近
+                }
+            }
+            float cy = Math.max(-0.5F, Math.min(1.5F, y));
+            java.util.List<Float> vals = new java.util.ArrayList<>();
+            for (int i = 0; i + 1 < base.length; i += 2) {
+                if (base[i] > cx && vals.size() >= 2 && vals.get(vals.size() - 2) < cx) {
+                    vals.add(cx);
+                    vals.add(cy);
+                }
+                vals.add(base[i]);
+                vals.add(base[i + 1]);
+            }
+            float[] out = new float[vals.size()];
+            for (int i = 0; i < out.length; i++) {
+                out[i] = vals.get(i);
+            }
+            return normalizeMulti(out);
+        }
+
+        /** 删掉第 index 个内部点；首尾不可删，越界或点太少都原样返回 */
+        public static float[] removeMulti(float[] pts, int index) {
+            float[] base = normalizeMulti(pts);
+            int count = interiorPointCount(base);
+            if (index < 0 || index >= count) {
+                return pts;
+            }
+            float[] out = new float[(count - 1 + 2) * 2];
+            int n = 0;
+            out[n++] = base[0];
+            out[n++] = base[1];
+            for (int i = 0; i < count; i++) {
+                if (i == index) {
+                    continue;
+                }
+                out[n++] = pointX(base, i);
+                out[n++] = pointY(base, i);
+            }
+            out[n++] = base[base.length - 2];
+            out[n] = base[base.length - 1];
+            return normalizeMulti(out);
+        }
+
+        /**
+         * 拖动第 index 个内部点：x 夹在左右邻居之间，y 夹在可视范围内。
+         *
+         * 夹 x 是必须的 —— 一旦越到邻居另一侧，排序之后点的身份就变了，
+         * 表现为"拖到一半手指下的点突然换成另一个"，非常难用。
+         */
+        public static float[] moveMulti(float[] pts, int index, float x, float y) {
+            float[] base = normalizeMulti(pts);
+            int count = interiorPointCount(base);
+            if (index < 0 || index >= count) {
+                return pts;
+            }
+            float lo = index == 0 ? MIN_POINT_X : pointX(base, index - 1) + MIN_POINT_GAP;
+            float hi = index == count - 1 ? MAX_POINT_X : pointX(base, index + 1) - MIN_POINT_GAP;
+            float cx = Math.max(lo, Math.min(hi, x));
+            float cy = Math.max(-0.5F, Math.min(1.5F, y));
+            float[] out = base.clone();
+            out[2 + index * 2] = cx;
+            out[3 + index * 2] = cy;
+            return normalizeMulti(out);
+        }
+
+        /**
+         * 把点集换算成一条**尽量接近**的贝塞尔（P1/P2 由两端切线得出）。
+         *
+         * 用户在多点模式下调好形状，切回贝塞尔模式时如果直接丢掉，那一下就是白调。
+         * 切线按两端相邻点连线的斜率取，再夹进合法范围。
+         */
+        public static float[] multiToBezier(float[] pts) {
+            float[] base = normalizeMulti(pts);
+            if (base.length < 6) {
+                return new float[] { 0.25F, 0.1F, 0.25F, 1.0F };
+            }
+            float dx1 = base[2] - base[0];
+            float dy1 = base[3] - base[1];
+            float dx2 = base[base.length - 2] - base[base.length - 4];
+            float dy2 = base[base.length - 1] - base[base.length - 3];
+            float x1 = clamp01(0.5F * dx1);
+            float y1 = clampY(dx1 <= 0.0F ? 0.0F : dy1 / dx1 * 0.5F);
+            float x2 = clamp01(1.0F - 0.5F * dx2);
+            float y2 = clampY(dx2 <= 0.0F ? 1.0F : 1.0F - dy2 / dx2 * 0.5F);
+            return new float[] { x1, y1, x2, y2 };
+        }
+
+        /** 多点曲线的点格式化成字符串（含首尾） */
+        public static String formatMulti(float[] pts) {
+            if (pts == null || pts.length < 4) {
+                return "0,0;1,1";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i + 1 < pts.length; i += 2) {
+                if (sb.length() > 0) {
+                    sb.append(';');
+                }
+                sb.append(trimFloat(pts[i])).append(',').append(trimFloat(pts[i + 1]));
+            }
+            return sb.toString();
+        }
+
+        private static String trimFloat(float v) {
+            String s = String.format(java.util.Locale.ROOT, "%.3f", v);
+            while (s.contains(".") && (s.endsWith("0"))) {
+                s = s.substring(0, s.length() - 1);
+            }
+            if (s.endsWith(".")) {
+                s = s.substring(0, s.length() - 1);
+            }
+            return s;
         }
 
         /** 自定义曲线的控制点；命名曲线返回 null */
@@ -209,6 +514,8 @@ public final class TransitionConfig {
                     return 1.0F - (float) Math.sqrt(Math.max(0.0, 1.0 - (double) x * x));
                 case 7:
                     return 2.70158F * x * x * x - 1.70158F * x * x;
+                case KIND_MULTI:
+                    return multiEase(this.points, x);
                 default:
                     return bezierEase(this.bezier, x);
             }
@@ -275,6 +582,10 @@ public final class TransitionConfig {
                 if (CUSTOM_ID.equals(trimmed)) {
                     return custom(TransitionConfig.parseBezier(DEFAULT_CUSTOM_BEZIER));
                 }
+                if (MULTI_ID.equals(trimmed)) {
+                    // 具体点位由 TransitionConfig 按方向/部位解析，这里只给个能用的默认
+                    return multi(new float[0]);
+                }
                 for (Curve curve : BUILT_IN) {
                     if (curve.id.equals(trimmed)) {
                         return curve;
@@ -286,11 +597,12 @@ public final class TransitionConfig {
 
         /** 全部可选 id（含 custom），供配置界面列出 */
         public static String[] ids() {
-            String[] ids = new String[BUILT_IN.length + 1];
+            String[] ids = new String[BUILT_IN.length + 2];
             for (int i = 0; i < BUILT_IN.length; i++) {
                 ids[i] = BUILT_IN[i].id;
             }
             ids[BUILT_IN.length] = CUSTOM_ID;
+            ids[BUILT_IN.length + 1] = MULTI_ID;
             return ids;
         }
     }
@@ -373,8 +685,8 @@ public final class TransitionConfig {
         }
         portalDurationMs = Math.max(MIN_PORTAL_DURATION_MS,
                 Math.min(MAX_PORTAL_DURATION_MS, storedPortal));
-        excludedScreens = properties.getProperty("excludedScreens", excludedScreens);
-        extraScreens = properties.getProperty("extraScreens", extraScreens);
+        setExcludedScreensInternal(properties.getProperty("excludedScreens", excludedScreens));
+        setExtraScreensInternal(properties.getProperty("extraScreens", extraScreens));
         // 迁移：老配置里只有一个 durationMs / curve，把它当作渐入渐出共同的值
         int legacyDuration = clampDuration(readInt(properties, "durationMs", DEFAULT_DURATION_MS));
         String legacyCurve = properties.getProperty("curve", curveId);
@@ -388,6 +700,28 @@ public final class TransitionConfig {
         if (!isValidBezier(legacyCustom)) {
             legacyCustom = DEFAULT_CUSTOM_BEZIER;
         }
+        // 按部位的曲线：没写过的部位保持"跟随全局"
+        resetPartCurves();
+        for (Part part : Part.values()) {
+            for (boolean closing : new boolean[] { false, true }) {
+                String dir = closing ? "close" : "open";
+                String globalCustom = closing ? closeCurveCustom : openCurveCustom;
+                String id = properties.getProperty("curve." + part.id() + "." + dir, Curve.FOLLOW_ID);
+                String pts = properties.getProperty("curveCustom." + part.id() + "." + dir, globalCustom);
+                partMap(closing, false).put(part, id == null ? Curve.FOLLOW_ID : id.trim().toLowerCase(java.util.Locale.ROOT));
+                partMap(closing, true).put(part, isValidBezier(pts) ? pts : DEFAULT_CUSTOM_BEZIER);
+            }
+        }
+        // 按界面分类的曲线与时长：没写过就保持"跟随全局"
+        resetCategories();
+        for (UiCategory category : UiCategory.values()) {
+            setCategoryInternal(category,
+                    properties.getProperty("categoryCurve." + category.id(), Curve.FOLLOW_ID),
+                    properties.getProperty("categoryCurveCustom." + category.id(), ""),
+                    readOptionalInt(properties, "categoryOpenMs." + category.id()),
+                    readOptionalInt(properties, "categoryCloseMs." + category.id()));
+        }
+        setChatFadeMsInternal(readInt(properties, "chatFadeMs", chatFadeMs));
         setOpenCurveCustomInternal(properties.getProperty("openCurveCustom", legacyCustom));
         setCloseCurveCustomInternal(properties.getProperty("closeCurveCustom", legacyCustom));
         rebuildSets();
@@ -420,6 +754,36 @@ public final class TransitionConfig {
         properties.setProperty("closeCurve", closeCurveId);
         properties.setProperty("openCurveCustom", openCurveCustom);
         properties.setProperty("closeCurveCustom", closeCurveCustom);
+        // 只写"不跟随全局"的部位，配置文件才不会被 28 行 default 淹没
+        for (Part part : Part.values()) {
+            for (boolean closing : new boolean[] { false, true }) {
+                String dir = closing ? "close" : "open";
+                String id = partCurveId(part, closing);
+                if (!Curve.FOLLOW_ID.equals(id)) {
+                    properties.setProperty("curve." + part.id() + "." + dir, id);
+                    properties.setProperty("curveCustom." + part.id() + "." + dir,
+                            partCurveCustom(part, closing));
+                }
+            }
+        }
+        // 只写"不跟随全局"的分类，理由同上面按部位的曲线
+        for (UiCategory category : UiCategory.values()) {
+            String id = categoryCurveId(category);
+            if (!Curve.FOLLOW_ID.equals(id)) {
+                properties.setProperty("categoryCurve." + category.id(), id);
+                properties.setProperty("categoryCurveCustom." + category.id(),
+                        CATEGORY_CUSTOM.getOrDefault(category, DEFAULT_CUSTOM_BEZIER));
+            }
+            Integer openMs = CATEGORY_OPEN_MS.get(category);
+            if (openMs != null) {
+                properties.setProperty("categoryOpenMs." + category.id(), Integer.toString(openMs));
+            }
+            Integer closeMs = CATEGORY_CLOSE_MS.get(category);
+            if (closeMs != null) {
+                properties.setProperty("categoryCloseMs." + category.id(), Integer.toString(closeMs));
+            }
+        }
+        properties.setProperty("chatFadeMs", Integer.toString(chatFadeMs));
         properties.setProperty("portalDurationMs", Integer.toString(portalDurationMs));
         properties.setProperty("fade", Boolean.toString(fade));
         properties.setProperty("fadeDim", Boolean.toString(fadeDim));
@@ -493,8 +857,10 @@ public final class TransitionConfig {
         scrollFadeBand = 200;
         scrollFadeMin = 0;
         portalDurationMs = DEFAULT_PORTAL_DURATION_MS;
-        excludedScreens = "";
-        extraScreens = DEFAULT_EXTRA_SCREENS;
+        setChatFadeMsInternal(DEFAULT_CHAT_FADE_MS);
+        resetCategories();
+        setExcludedScreensInternal("");
+        setExtraScreensInternal(DEFAULT_EXTRA_SCREENS);
         curveId = Curve.CUBIC.id();
         curveCache = Curve.CUBIC;
         openCurveId = Curve.CUBIC.id();
@@ -503,6 +869,7 @@ public final class TransitionConfig {
         closeCurveCache = Curve.CUBIC;
         openCurveCustom = DEFAULT_CUSTOM_BEZIER;
         closeCurveCustom = DEFAULT_CUSTOM_BEZIER;
+        resetPartCurves();
 
         rebuildSets();
         save();
@@ -648,6 +1015,315 @@ public final class TransitionConfig {
     }
 
     /** 渐出（关闭）用的曲线 */
+    /** 可以单独配曲线的"部位"。顺序即界面上动画列表的顺序。 */
+    public enum Part {
+        PANEL("panel"),
+        DIM("dim"),
+        ITEMS("items"),
+        TEXT("text"),
+        SUBTITLES("subtitles"),
+        TAB("tab"),
+        PORTAL("portal");
+
+        private final String id;
+
+        Part(String id) {
+            this.id = id;
+        }
+
+        public String id() {
+            return this.id;
+        }
+
+        public static Part byId(String id) {
+            for (Part p : values()) {
+                if (p.id.equals(id)) {
+                    return p;
+                }
+            }
+            return null;
+        }
+    }
+
+    /** 按部位存的曲线 id；没设过 / 设成 default 就跟随全局 */
+    private static final java.util.Map<Part, String> PART_OPEN_CURVE =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
+    private static final java.util.Map<Part, String> PART_CLOSE_CURVE =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
+    private static final java.util.Map<Part, String> PART_OPEN_CUSTOM =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
+    private static final java.util.Map<Part, String> PART_CLOSE_CUSTOM =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(Part.class));
+    private static java.util.Map<Part, String> partMap(boolean closing, boolean custom) {
+        if (closing) {
+            return custom ? PART_CLOSE_CUSTOM : PART_CLOSE_CURVE;
+        }
+        return custom ? PART_OPEN_CUSTOM : PART_OPEN_CURVE;
+    }
+
+    /** 这个部位这一方向配的是哪条曲线（可能是 FOLLOW_ID） */
+    public static String partCurveId(Part part, boolean closing) {
+        return partMap(closing, false).getOrDefault(part, Curve.FOLLOW_ID);
+    }
+
+    public static String partCurveCustom(Part part, boolean closing) {
+        return partMap(closing, true).getOrDefault(part, DEFAULT_CUSTOM_BEZIER);
+    }
+
+    /**
+     * 实际要用的曲线：配了就用配的，没配（default）就回退到全局的渐入/渐出曲线。
+     * 核心代码只调这一个，不必关心"跟随全局"这回事。
+     */
+    public static Curve curveFor(Part part, boolean closing) {
+        String id = partCurveId(part, closing);
+        if (part == null || Curve.FOLLOW_ID.equals(id)) {
+            return closing ? closeCurve() : openCurve();
+        }
+        return resolveCurve(id, partCurveCustom(part, closing));
+    }
+
+    // ================================================================== 界面分类
+    //
+    // 「部位」切的是**一屏之内**的各个图层（底板/物品/文字…），
+    // 「界面分类」切的是**哪一类界面**（聊天栏 / 创造物品栏 / 游戏菜单 / 容器 / 传送门）。
+    // 两者正交：分类决定"这一类界面用哪条曲线、多长时长"，部位决定"这一屏里的某一层怎么淡"。
+
+    /** 界面分类。顺序即配置界面里选项卡的顺序。 */
+    public enum UiCategory {
+        CHAT("chat", "ui_transitions.category.chat"),
+        CREATIVE("creative", "ui_transitions.category.creative"),
+        GAME_MENU("game_menu", "ui_transitions.category.game_menu"),
+        CONTAINER("container", "ui_transitions.category.container"),
+        PORTAL("portal", "ui_transitions.category.portal"),
+        OTHER("other", "ui_transitions.category.other");
+
+        private final String id;
+        private final String labelKey;
+
+        UiCategory(String id, String labelKey) {
+            this.id = id;
+            this.labelKey = labelKey;
+        }
+
+        public String id() {
+            return this.id;
+        }
+
+        /** 翻译键（配置界面选项卡标题用） */
+        public String labelKey() {
+            return this.labelKey;
+        }
+
+        /**
+         * 这个界面属于哪一类。按**类名**判断，不 import 具体界面类 ——
+         * 这样以后原版改包名/加新界面时，最多是"归到 other"，不会编译不过。
+         */
+        public static UiCategory of(String className) {
+            if (className == null) {
+                return OTHER;
+            }
+            // 聊天栏：聊天输入框（HUD 上的聊天消息是另一条路，见 chatAlphaForLine）
+            if (className.contains("ChatScreen")) {
+                return CHAT;
+            }
+            if (className.contains("CreativeModeInventory")) {
+                return CREATIVE;
+            }
+            if (className.contains("PauseScreen")) {
+                return GAME_MENU;
+            }
+            if (className.contains("LevelLoading") || className.contains("ReceivingLevel")) {
+                return PORTAL;
+            }
+            if (className.contains("ContainerScreen") || className.contains("InventoryScreen")
+                    || className.contains("ChestScreen") || className.contains("FurnaceScreen")
+                    || className.contains("CraftingScreen") || className.contains("HopperScreen")
+                    || className.contains("ShulkerBoxScreen") || className.contains("DispenserScreen")
+                    || className.contains("BrewingStandScreen") || className.contains("MerchantScreen")
+                    || className.contains("AnvilScreen") || className.contains("BeaconScreen")
+                    || className.contains("EnchantmentScreen") || className.contains("GrindstoneScreen")
+                    || className.contains("LoomScreen") || className.contains("SmithingScreen")
+                    || className.contains("StonecutterScreen") || className.contains("CartographyScreen")) {
+                return CONTAINER;
+            }
+            return OTHER;
+        }
+    }
+
+    /** 按分类存的曲线 id；没设过就跟随全局 */
+    private static final java.util.Map<UiCategory, String> CATEGORY_CURVE =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(UiCategory.class));
+    private static final java.util.Map<UiCategory, String> CATEGORY_CUSTOM =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(UiCategory.class));
+    private static final java.util.Map<UiCategory, Integer> CATEGORY_OPEN_MS =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(UiCategory.class));
+    private static final java.util.Map<UiCategory, Integer> CATEGORY_CLOSE_MS =
+            java.util.Collections.synchronizedMap(new java.util.EnumMap<>(UiCategory.class));
+
+    /** 这一分类配的是哪条曲线（可能是 FOLLOW_ID = 跟随全局） */
+    public static String categoryCurveId(UiCategory category) {
+        return CATEGORY_CURVE.getOrDefault(category, Curve.FOLLOW_ID);
+    }
+
+    /** 这一分类实际要用的曲线：没单独配就回退到全局 */
+    public static Curve curveForCategory(UiCategory category) {
+        if (category == null) {
+            return openCurve();
+        }
+        String id = CATEGORY_CURVE.getOrDefault(category, Curve.FOLLOW_ID);
+        if (Curve.FOLLOW_ID.equals(id)) {
+            return openCurve();
+        }
+        return resolveCurve(id, CATEGORY_CUSTOM.getOrDefault(category, DEFAULT_CUSTOM_BEZIER));
+    }
+
+    /** 某一分类的渐入时长（毫秒）；没单独设过就跟随全局 */
+    public static int openDurationFor(UiCategory category) {
+        Integer value = category == null ? null : CATEGORY_OPEN_MS.get(category);
+        return value == null ? openDurationMs : value;
+    }
+
+    /** 某一分类的渐出时长（毫秒）；没单独设过就跟随全局 */
+    public static int closeDurationFor(UiCategory category) {
+        Integer value = category == null ? null : CATEGORY_CLOSE_MS.get(category);
+        return value == null ? closeDurationMs : value;
+    }
+
+    /**
+     * 这一分类有没有单独设过时长。
+     * 界面上要显示"跟随全局（480ms）"还是"单独设置（700ms）"，靠它区分 ——
+     * 光看数值分不出来（单独设成和全局一样也是合法的）。
+     */
+    public static boolean hasOwnDuration(UiCategory category, boolean closing) {
+        java.util.Map<UiCategory, Integer> map = closing ? CATEGORY_CLOSE_MS : CATEGORY_OPEN_MS;
+        return category != null && map.containsKey(category);
+    }
+
+    public static synchronized void setCategoryCurve(UiCategory category, String id) {
+        if (category == null) {
+            return;
+        }
+        String clean = id == null ? Curve.FOLLOW_ID : id.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!Curve.FOLLOW_ID.equals(clean) && !Curve.MULTI_ID.equals(clean)
+                && !Curve.byId(clean).id().equals(clean)) {
+            clean = Curve.FOLLOW_ID;
+        }
+        CATEGORY_CURVE.put(category, clean);
+        save();
+    }
+
+    /** 设置分类的自定义形状（贝塞尔或多点，类型按值的格式推断） */
+    public static synchronized void setCategoryCurveCustom(UiCategory category, String points) {
+        if (category == null || !isValidBezier(points)) {
+            return;
+        }
+        CATEGORY_CUSTOM.put(category, points);
+        CATEGORY_CURVE.put(category, kindForPoints(points));
+        save();
+    }
+
+    /** 把这一分类的时长单独设成 value；value <= 0 表示"回到跟随全局" */
+    public static synchronized void setCategoryDuration(UiCategory category, boolean closing, int value) {
+        if (category == null) {
+            return;
+        }
+        java.util.Map<UiCategory, Integer> map = closing ? CATEGORY_CLOSE_MS : CATEGORY_OPEN_MS;
+        if (value <= 0) {
+            map.remove(category);
+        } else {
+            map.put(category, clampDuration(value));
+        }
+        save();
+    }
+
+    /** 全部回到"跟随全局"（读配置与重置时用） */
+    private static void resetCategories() {
+        for (java.util.Map<?, ?> m : java.util.List.of(
+                CATEGORY_CURVE, CATEGORY_CUSTOM, CATEGORY_OPEN_MS, CATEGORY_CLOSE_MS)) {
+            m.clear();
+        }
+    }
+
+    private static void setCategoryInternal(UiCategory category, String curveId, String custom,
+                                            Integer openMs, Integer closeMs) {
+        if (curveId != null && !Curve.FOLLOW_ID.equals(curveId)) {
+            CATEGORY_CURVE.put(category, curveId);
+        }
+        if (custom != null && !custom.isBlank()) {
+            CATEGORY_CUSTOM.put(category, custom);
+        }
+        if (openMs != null) {
+            CATEGORY_OPEN_MS.put(category, openMs);
+        }
+        if (closeMs != null) {
+            CATEGORY_CLOSE_MS.put(category, closeMs);
+        }
+    }
+
+    public static synchronized void setPartCurve(Part part, boolean closing, String id) {
+        if (part == null) {
+            return;
+        }
+        String clean = id == null ? Curve.FOLLOW_ID : id.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!Curve.FOLLOW_ID.equals(clean)
+                && !Curve.MULTI_ID.equals(clean)
+                && !Curve.byId(clean).id().equals(clean)) {
+            clean = Curve.FOLLOW_ID;
+        }
+        partMap(closing, false).put(part, clean);
+        save();
+    }
+
+    /**
+     * 判断一段点位字符串是"贝塞尔控制点"还是"多点曲线"，返回该用哪个 id。
+     *
+     * **必须按内容判、不能按"这一项当前是什么 id"判。** 这两种数据共用 `curveCustom`
+     * 字段，界面又可以在同一次编辑里把形状从一种改成另一种（多点 ↔ 控制点），
+     * 所以只看旧 id 一定会写出"id 说 multi、值却是贝塞尔"这种自相矛盾的配置 ——
+     * 之后按 multi 解析会得到空点集，曲线**静默变成一条直线**。
+     *
+     * 两种格式不可能混淆：多点一定有 `;`（至少两组 x,y），贝塞尔恰好四段且无 `;`。
+     */
+    private static String kindForPoints(String points) {
+        if (points != null && points.indexOf(';') >= 0) {
+            return Curve.MULTI_ID;
+        }
+        return Curve.CUSTOM_ID;
+    }
+
+    public static synchronized void setPartCurveCustom(Part part, boolean closing, String points) {
+        if (part == null) {
+            return;
+        }
+        if (!isValidBezier(points)) {
+            points = DEFAULT_CUSTOM_BEZIER;
+        }
+        partMap(closing, true).put(part, points);
+        // 改控制点意味着想用自定义曲线，顺手把这一项切到对应的自定义类型。
+        // 类型按**值的格式**推断（见 kindForPoints）—— 早先这里无条件写 custom，
+        // 多点曲线会被 parseBezier 判成非法输入、静默退回默认控制点，用户拖出来的形状白丢。
+        partMap(closing, false).put(part, kindForPoints(points));
+        save();
+    }
+
+    /** 把某个部位切成多点曲线（点集为空时等价于线性，界面随后会写回真实点位） */
+    public static synchronized void setPartCurveMulti(Part part, boolean closing, String points) {
+        if (part == null) {
+            return;
+        }
+        partMap(closing, true).put(part, points == null ? "" : points);
+        partMap(closing, false).put(part, Curve.MULTI_ID);
+        save();
+    }
+
+    /** 全部回到"跟随全局" */
+    private static void resetPartCurves() {
+        for (java.util.Map<Part, String> m : java.util.List.of(
+                PART_OPEN_CURVE, PART_CLOSE_CURVE, PART_OPEN_CUSTOM, PART_CLOSE_CUSTOM)) {
+            m.clear();
+        }
+    }
+
     public static Curve closeCurve() {
         return closeCurveCache;
     }
@@ -664,6 +1340,9 @@ public final class TransitionConfig {
     private static Curve resolveCurve(String id, String customPoints) {
         if (Curve.CUSTOM_ID.equals(id)) {
             return Curve.custom(parseBezier(customPoints));
+        }
+        if (Curve.MULTI_ID.equals(id)) {
+            return Curve.multi(Curve.parseMulti(customPoints));
         }
         return Curve.byId(id);
     }
@@ -694,6 +1373,11 @@ public final class TransitionConfig {
     public static boolean isValidBezier(String value) {
         if (value == null) {
             return false;
+        }
+        // 多点曲线存的是 "x,y;x,y;…"，用的是同一个字段，所以这里要一并放行 ——
+        // 否则用户在图上拖出来的点会被判成非法、悄悄退回默认值。
+        if (value.indexOf(';') >= 0) {
+            return Curve.parseMulti(value).length >= 4;
         }
         String[] parts = value.split(",");
         if (parts.length != 4) {
@@ -739,6 +1423,68 @@ public final class TransitionConfig {
         }
     }
 
+    /**
+     * 逗号分隔的配置项 → 列表。
+     *
+     * 从配置界面里搬出来的：排除列表要新增一个**双列表界面**，两边都得用同一套切分规则。
+     * 各自实现一份的话，只要有一处 trim / 忽略空项的做法不同，
+     * "界面上看着加进去了、实际没写进配置"这类问题就会跟着来。
+     */
+    public static java.util.List<String> splitList(String value) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (value != null) {
+            for (String part : value.split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) {
+                    out.add(trimmed);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 列表 → 逗号分隔的配置项 */
+    public static String joinList(java.util.List<String> list) {
+        if (list == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String item : list) {
+            String trimmed = item == null ? "" : item.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(trimmed);
+        }
+        return sb.toString();
+    }
+
+    /** 当前排除项的原始写法（可能是完整类名，也可能是包名前缀） */
+    public static java.util.List<String> excludedEntries() {
+        return splitList(excludedScreens);
+    }
+
+    /**
+     * 这条排除项是不是"一段可以整个删掉的前缀"（也就是用户手填的包名，如 `mezz.jei`）。
+     *
+     * 判据：**最后一段以小写字母开头**就当它是包名。Java 的类名按惯例首字母大写，
+     * 所以 `mezz.jei` → 前缀（true），`mezz.jei.SomeScreen` → 具体类名（false）。
+     * 这个判据不完美（小写类名、或是包名里最后一段恰好大写都会判错），
+     * 所以它只用来**决定界面上显示什么提示文案**，不用来决定能不能删除 ——
+     * 用户一旦想删就必须能删掉，不能因为我们的猜测把人卡住。
+     */
+    public static boolean isPrefixEntry(String entry) {
+        if (entry == null || entry.isEmpty()) {
+            return false;
+        }
+        int dot = entry.lastIndexOf('.');
+        String last = dot < 0 ? entry : entry.substring(dot + 1);
+        return !last.isEmpty() && Character.isLowerCase(last.charAt(0));
+    }
+
     /** excludedScreens 与 extraScreens 一样按前缀匹配（写包名也能整包排除） */
     public static boolean isExcluded(String className) {
         Set<String> set = excludedSet;
@@ -769,6 +1515,14 @@ public final class TransitionConfig {
         return false;
     }
 
+    /**
+     * 界面名单的两份表示：字符串（写文件用）与集合（判定用）**必须一起改**。
+     *
+     * 这就是这个私有方法存在的理由：`excludedScreens` 与 `excludedSet` 是同一份数据的两种形态，
+     * 而"只改字符串、忘了重建集合"曾经真的发生过 —— 症状是**排除列表看着生效了，实际判定还按缓存来**：
+     * 界面上显示已排除，动画却照做（或者反过来），而且不看代码根本想不到是缓存的事。
+     * 所以对外只暴露下面那对 Internal / setter，任何赋值都必须经过这里。
+     */
     private static void rebuildSets() {
         excludedSet = parseSet(excludedScreens);
         extraSet = parseSet(extraScreens);
@@ -851,6 +1605,29 @@ public final class TransitionConfig {
     public static synchronized void setCloseCurveCustom(String value) {
         setCloseCurveCustomInternal(value);
         closeCurveId = Curve.CUSTOM_ID;
+        closeCurveCache = resolveCurve(closeCurveId, closeCurveCustom);
+        save();
+    }
+
+    /**
+     * 设置渐入的多点曲线点集，并把渐入切到 multi。
+     *
+     * 与 setOpenCurveCustom 的差别只有"切成哪个 id"：点集和贝塞尔控制点共用
+     * 同一个 `*CurveCustom` 字段，靠 id 决定怎么解析它。
+     */
+    public static synchronized void setOpenCurveMulti(String points) {
+        setOpenCurveCustomInternal(points);
+        openCurveId = Curve.MULTI_ID;
+        openCurveCache = resolveCurve(openCurveId, openCurveCustom);
+        curveId = openCurveId;
+        curveCache = openCurveCache;
+        save();
+    }
+
+    /** 设置渐出的多点曲线点集，并把渐出切到 multi */
+    public static synchronized void setCloseCurveMulti(String points) {
+        setCloseCurveCustomInternal(points);
+        closeCurveId = Curve.MULTI_ID;
         closeCurveCache = resolveCurve(closeCurveId, closeCurveCustom);
         save();
     }
@@ -980,15 +1757,24 @@ public final class TransitionConfig {
     }
 
     public static synchronized void setExcludedScreens(String value) {
-        excludedScreens = value == null ? "" : value;
-        rebuildSets();
+        setExcludedScreensInternal(value);
         save();
     }
 
     public static synchronized void setExtraScreens(String value) {
+        setExtraScreensInternal(value);
+        save();
+    }
+
+    /** 只写字段 + 重建集合、不存盘：给 load() / resetToDefaults() 用 */
+    private static void setExcludedScreensInternal(String value) {
+        excludedScreens = value == null ? "" : value;
+        rebuildSets();
+    }
+
+    private static void setExtraScreensInternal(String value) {
         extraScreens = value == null ? "" : value;
         rebuildSets();
-        save();
     }
 
     // ================================================================== 工具
@@ -1014,6 +1800,29 @@ public final class TransitionConfig {
 
     private static int clampTabMs(int value) {
         return Math.max(MIN_TAB_SWITCH_MS, Math.min(MAX_TAB_SWITCH_MS, value));
+    }
+
+    /** 只写字段不存盘：给 load()/reset 用 */
+    private static void setChatFadeMsInternal(int value) {
+        chatFadeMs = Math.max(MIN_CHAT_FADE_MS, Math.min(MAX_CHAT_FADE_MS, value));
+    }
+
+    /**
+     * 读一个"可以不写"的整数键：**没写就返回 null**，而不是回退到某个默认值。
+     *
+     * 这是"跟随全局"能成立的关键：分类时长必须能区分"没配过"与"配成了和全局一样"，
+     * 用 `readInt(..., 默认值)` 会把两者压成同一个值，界面上就永远显示不出"跟随全局"。
+     */
+    private static Integer readOptionalInt(Properties properties, String key) {
+        String raw = properties.getProperty(key);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return clampDuration(Integer.parseInt(raw.trim()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static float clampJelly(float value) {

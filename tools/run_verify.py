@@ -73,6 +73,14 @@ def main():
             sys.exit("缺少目录 %s: %s" % (label, path))
 
     sources = java_sources(STUBS)
+    # anim/ 数学层：纯 Java、无 MC 依赖，所以能进这一关（本关**故意没有 classpath**）。
+    # 它被 UiTransitions import（ColorMath），漏掉就会直接编译不过。
+    # 注意：加的是**整个目录**，将来 anim/ 里新增文件不需要再改这里。
+    ANIM = os.path.join(CORE, "anim")
+    if os.path.isdir(ANIM):
+        anim_sources = java_sources(ANIM)
+        sources.extend(anim_sources)
+        print("anim/ 数学层：%d 个源文件" % len(anim_sources))
     # 只取核心两个类：fabric/neoforge/sodium 那些需要真实依赖，断言用不到
     for name in ("UiTransitions.java", "TransitionConfig.java"):
         p = os.path.join(CORE, name)

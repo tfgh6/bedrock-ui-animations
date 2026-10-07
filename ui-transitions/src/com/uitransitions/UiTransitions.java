@@ -1,5 +1,8 @@
 package com.uitransitions;
 
+import com.uitransitions.anim.Channel;
+import com.uitransitions.anim.ColorMath;
+import com.uitransitions.anim.Engine;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -46,11 +49,11 @@ public final class UiTransitions {
     private static final ThreadLocal<Float> LAYER_ALPHA = ThreadLocal.withInitial(() -> 1.0F);
     private static final ThreadLocal<Boolean> STATIC_REGION = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> HUD_PAUSED = ThreadLocal.withInitial(() -> false);
+    /** pauseForHud 是否真的抵消过位移（跟随动画那条路不抵消，恢复时也不能补） */
+    private static final ThreadLocal<Boolean> HUD_SHIFTED = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> PIP_BLITTING = ThreadLocal.withInitial(() -> false);
-    /** 当前这一帧的界面是否已收到关闭指令（收到就立即隐藏玩家模型） */
     /** 本帧内容层整体的淡变透明度（帧级：直到下一帧开始才复位，供 HUD 快捷栏判断用） */
     private static volatile float FRAME_FADE_ALPHA = 1.0F;
-    /** 打开界面时，玩家模型的透明度覆盖值；负数表示不干预 */
     /**
      * 内容层本帧的淡变透明度，**帧内跨阶段保留**。
      *
@@ -70,14 +73,36 @@ public final class UiTransitions {
      */
     private static final ThreadLocal<Float> PIP_SHIFT = ThreadLocal.withInitial(() -> 0.0F);
     private static final ThreadLocal<Boolean> TAB_STATIC = ThreadLocal.withInitial(() -> false);
+    /** 冻住快捷栏时被替换掉的 PIP_FRAME_ALPHA，恢复时还原 */
+    private static final ThreadLocal<Float> TAB_STATIC_SAVED_PIP = ThreadLocal.withInitial(() -> 1.0F);
+    /**
+     * 冻住快捷栏时被替换掉的 TEXT_ALPHA，恢复时还原。
+     *
+     * 快捷栏物品的**数量文字**走文字通道（`applyAlphaText` → `TEXT_ALPHA`），
+     * 它跟 pip 那条路是两套来源。1.5.01 之前只冻了 pip，于是出现
+     * "图标不淡、数字在淡" —— 用户看到的仍然是"快捷栏跟着一起渐变"。
+     */
+    private static final ThreadLocal<Float> TAB_STATIC_SAVED_TEXT = ThreadLocal.withInitial(() -> 1.0F);
     /**
      * 物品/画中画走的是预乘 alpha 管线（GUI_TEXTURED_PREMULTIPLIED_ALPHA）：
      * 颜色通道本应已经乘过 alpha。只改 alpha 而不动 RGB，元素就会比周围偏亮
-     * —— 这就是"切换时物品突然变亮"的原因。进这条管线时把 RGB 一起按比例缩放。
+     * —— 这就是"切换时物品突然变亮"的原因。
+     *
+     * **注意：`modulate` 已经不再读这个标志**（它改成显式参数了，见 modulate 的注释）。
+     * 这个 ThreadLocal 目前只由 beginItemSubmit / endItemSubmit 设置，没有读者 ——
+     * 它的存在是为了让"是否处于物品提交窗口"这件事仍然可查（第 3 步接通道化时会用到）。
+     * 如果你要在这个窗口里画文字或矩形，**不会再被错当成预乘颜色**了。
      */
     private static final ThreadLocal<Boolean> PREMULTIPLIED = ThreadLocal.withInitial(() -> false);
     /** 本帧的动画透明度：物品渲染状态没登记到（例如状态是在动画开始前建立的）就退回这个值 */
     private static final ThreadLocal<Float> FRAME_ALPHA = ThreadLocal.withInitial(() -> 1.0F);
+
+    /**
+     * 文字的透明度。与 WINDOW_ALPHA 分开，是为了让「文字」能配一条自己的曲线：
+     * WINDOW_ALPHA 管的是物品与矩形，文字走这里（见 applyAlphaText）。
+     * 内容层没在动画时保持 1.0，文字就是原样。
+     */
+    private static final ThreadLocal<Float> TEXT_ALPHA = ThreadLocal.withInitial(() -> 1.0F);
     /**
      * 当前背景层用的提取器。
      *
@@ -87,6 +112,8 @@ public final class UiTransitions {
      * 而不是只在 Screen.extractBackground 这一个调用点上打补丁。
      */
     private static final ThreadLocal<GuiGraphicsExtractor> BACKGROUND_EXTRACTOR = new ThreadLocal<>();
+    /** 当前处于"背景层"的界面：遮罩要按自己的曲线重算透明度时需要它 */
+    private static final ThreadLocal<Screen> BACKGROUND_SCREEN = new ThreadLocal<>();
 
     /** 创造模式分类标签等"换页"动画：记录每屏的开始时间与滚动方向 */
     private static final Map<Screen, TabSwitch> TAB_SWITCH = new WeakHashMap<>();
@@ -202,8 +229,36 @@ public final class UiTransitions {
                 }
                 long backdate = 0L;
                 if (CLOSING.containsKey(target)) {
-                    backdate = backdateNanos(
-                            solveProgress(TransitionConfig.openCurve(), visualAlpha(target), false), openDuration);
+                    // 目标透明度来自 `visualAlpha(target)`。此刻 target 还在 CLOSING 里，
+                    // 所以它走的是 `1.0F - curve.easeIn(p)` 这条**递减**式子 ——
+                    // 因此第三个参数必须是 true（按 1-easeIn 反解）。
+                    //
+                    // 早先这里传的是 false（按 easeOut 反解一个递增式子），等于去找一个
+                    // 不存在的根：实测 solveProgress(cubic, 0.131, false) = 0.0457，
+                    // 代回去得到 0.0063 而不是 0.131。表现是"打开播到一半被关掉、再打开"
+                    // 时透明度跳一下。
+                    //
+                    // 曲线取 `closeCurve()` 而不是 `openCurve()`：**必须与 visualAlpha 读的那条
+                    // 是同一条**，否则反解出来的进度对不上可见值，接续仍然会跳。
+                    // （`curveFor` 依赖 CLOSING，等下面 remove 之后就查不到这条了，所以这里直接取。）
+                    Close interrupted = CLOSING.get(target);
+                    float handoff = solveProgress(TransitionConfig.closeCurve(),
+                            visualAlpha(target), true);
+                    // **回拨必须用"算出这个进度的那段动画"的时长**（关闭段的），
+                    // 不是接下来的渐入时长 —— 见 progress() 上面那段注释，这是同一条规矩。
+                    // 用错时长会让新动画的起点整体偏移（实测跳变 43/255）。
+                    backdate = interrupted != null
+                            ? backdateNanos(handoff, interrupted.durationNanos())
+                            : backdateNanos(handoff, openDuration);
+                    if (DEBUG_REOPEN < 20) {
+                        DEBUG_REOPEN++;
+                        log("重开接续: 可见=" + visualAlpha(target)
+                                + " 反解进程=" + handoff
+                                + " 关闭段时长=" + (interrupted == null ? -1
+                                        : interrupted.durationNanos() / 1_000_000L) + "ms"
+                                + " 渐入时长=" + (openDuration / 1_000_000L) + "ms"
+                                + " 回拨=" + (backdate / 1_000_000L) + "ms");
+                    }
                     CLOSING.remove(target);
                 }
                 OPEN_START.put(target, new Open(now - backdate, openDuration));
@@ -276,6 +331,7 @@ public final class UiTransitions {
             beginLayer(screen, extractor, progress, false);
             BACKGROUND_PUSHED.set(true);
             BACKGROUND_EXTRACTOR.set(extractor);      // 供 Hud 里的字幕抵消使用
+            BACKGROUND_SCREEN.set(screen);
         } catch (Throwable t) {
             report("beginBackgroundLayer", t);
         }
@@ -294,6 +350,7 @@ public final class UiTransitions {
             report("endBackgroundLayer", t);
         } finally {
             BACKGROUND_EXTRACTOR.remove();
+            BACKGROUND_SCREEN.remove();
         }
     }
 
@@ -370,12 +427,26 @@ public final class UiTransitions {
     private static void beginLayer(Screen screen, GuiGraphicsExtractor extractor, float progress,
                                    boolean contentLayer) {
         float shift = shift(screen, progress);
-        float alpha = TransitionConfig.fade() ? alpha(screen, progress, contentLayer) : 1.0F;
+        // 底板与物品各用各的曲线；文字再单独算一条（见 TEXT_ALPHA）
+        TransitionConfig.Part part = contentLayer
+                ? TransitionConfig.Part.ITEMS : TransitionConfig.Part.PANEL;
+        float alpha = TransitionConfig.fade() ? alpha(screen, progress, part) : 1.0F;
+        float textAlpha = alpha;
+        if (TransitionConfig.fade() && contentLayer && TransitionConfig.fadeText()) {
+            textAlpha = alpha(screen, progress, TransitionConfig.Part.TEXT);
+        }
         LAYER_SHIFT.set(shift);
         LAYER_ALPHA.set(alpha);
         WINDOW_ALPHA.set(alpha);
         FRAME_ALPHA.set(alpha);
+        TEXT_ALPHA.set(textAlpha);
         PIP_FRAME_ALPHA = alpha;       // 帧级：渲染阶段贴画中画时还要用
+        // **压栈在这里是无条件的**（历史上这里曾经只在某些分支走到）：
+        // endBackgroundLayer / endContentLayer 只看自己那一对 begin 有没有跑过就弹栈，
+        // 少压一次就等于多弹一次，整个渲染管线的矩阵栈会错位 ——
+        // 后果是后续绘制坐标全偏，甚至把裁剪区算成 0 高/0 宽而崩在渲染阶段
+        // （26.3 的裁剪是延迟下发的，堆栈里看不到调用者）。
+        // 关掉淡变时位移照旧生效（那本来就是"只滑动、不淡出"），所以这一压栈也是必须的。
         Matrix3x2fStack pose = extractor.pose();
         pose.pushMatrix();
         pose.translate(0.0F, shift);
@@ -396,7 +467,13 @@ public final class UiTransitions {
             if (!TransitionConfig.animateDim() && shift != 0.0F) {
                 extractor.pose().translate(0.0F, -shift);
             }
-            WINDOW_ALPHA.set(TransitionConfig.fadeDim() ? LAYER_ALPHA.get() : 1.0F);
+            // 遮罩走自己的曲线：拿当前进度重算一次，而不是沿用底板的透明度
+            float dimAlpha = LAYER_ALPHA.get();
+            Screen dimScreen = BACKGROUND_SCREEN.get();
+            if (dimScreen != null && TransitionConfig.fade()) {
+                dimAlpha = alpha(dimScreen, progress(dimScreen), TransitionConfig.Part.DIM);
+            }
+            WINDOW_ALPHA.set(TransitionConfig.fadeDim() ? dimAlpha : 1.0F);
             STATIC_REGION.set(true);
         } catch (Throwable t) {
             report("pauseForStaticRegion", t);
@@ -424,20 +501,32 @@ public final class UiTransitions {
      * 音效字幕：顺带在背景层里绘制，默认既不平移也不淡出
      * （否则打开背包时字幕会跟着一起动）。animateSubtitles=true 时让它一起动画。
      *
-     * 这一对由 HotbarTabExcludeMixin 注入在 {@code Hud.extractDeferredSubtitles} 上，
+     * 这一对由 **HudSubtitleMixin** 注入在 {@code Hud.extractDeferredSubtitles} 上，
      * 因此 Screen / PauseScreen / LoadingOverlay 这些调用点都被覆盖 —— 早期版本只在
      * Screen.extractBackground 的调用点做抵消，暂停菜单自己重写了该方法，字幕照样会动。
      */
     public static void pauseForHud() {
         try {
             GuiGraphicsExtractor extractor = BACKGROUND_EXTRACTOR.get();
-            if (extractor == null || !BACKGROUND_PUSHED.get() || HUD_PAUSED.get()
-                    || TransitionConfig.animateSubtitles()) {
+            if (extractor == null || !BACKGROUND_PUSHED.get() || HUD_PAUSED.get()) {
                 return;
             }
+            if (TransitionConfig.animateSubtitles()) {
+                // 跟随动画：位移照旧跟着走，但**淡变用字幕自己的曲线**。
+                // 这里不抵消位移，所以也不置 HUD_SHIFTED，恢复时自然不会反向补回来。
+                Screen subtitleScreen = BACKGROUND_SCREEN.get();
+                if (subtitleScreen != null && TransitionConfig.fade()) {
+                    WINDOW_ALPHA.set(alpha(subtitleScreen, progress(subtitleScreen),
+                            TransitionConfig.Part.SUBTITLES));
+                }
+                HUD_PAUSED.set(true);
+                return;
+            }
+            // 默认：冻结 —— 抵消位移并保持不透明，字幕完全等同原版
             float shift = LAYER_SHIFT.get();
             if (shift != 0.0F) {
                 extractor.pose().translate(0.0F, -shift);
+                HUD_SHIFTED.set(true);
             }
             WINDOW_ALPHA.set(1.0F);
             HUD_PAUSED.set(true);
@@ -454,9 +543,11 @@ public final class UiTransitions {
             HUD_PAUSED.set(false);
             GuiGraphicsExtractor extractor = BACKGROUND_EXTRACTOR.get();
             float shift = LAYER_SHIFT.get();
-            if (extractor != null && shift != 0.0F) {
+            // 只有冻结那次真的抵消过位移，才反向补回来
+            if (HUD_SHIFTED.get() && extractor != null && shift != 0.0F) {
                 extractor.pose().translate(0.0F, shift);
             }
+            HUD_SHIFTED.set(false);
             WINDOW_ALPHA.set(LAYER_ALPHA.get());
         } catch (Throwable t) {
             HUD_PAUSED.set(false);
@@ -468,7 +559,7 @@ public final class UiTransitions {
 
     /** 贴图块、纯色块（含底板与遮罩渐变）的 alpha 调制 */
     public static int applyAlphaBlit(int color) {
-        return modulate(color);
+        return ENGINE.apply(Channel.BLIT, color);
     }
 
     /** 文字（含文字背景）的 alpha 调制，可单独关闭 */
@@ -476,34 +567,95 @@ public final class UiTransitions {
         if (!TransitionConfig.fadeText()) {
             return color;
         }
-        return modulate(color);
+        // 冻结期间（点标签换页时保快捷栏原版观感）**任何乘子都不生效**。
+        // 判断放在最前面而不是只靠"把 TEXT_ALPHA 复位成 1"：这样以后往这里加新的乘子，
+        // 也不会再需要记得"也要在冻结清单里加一项"（那个清单已经漏过两次）。
+        if (TAB_STATIC.get()) {
+            return color;
+        }
+        // 文字用自己那条曲线算出来的透明度（见 TEXT_ALPHA），物品与矩形仍走 WINDOW_ALPHA
+        float alpha = TEXT_ALPHA.get();
+        // 聊天栏正在淡入时把它乘进来：聊天文字走的正是这条通道
+        if (chatFadeActive) {
+            alpha *= chatFadeAlpha();
+        }
+        return ENGINE.apply(Channel.TEXT, color, alpha);
+    }
+
+    /**
+     * 颜色通道路由（第 2 步）。
+     *
+     * 三个来源都指向**现有的 ThreadLocal** —— 所以行为逐位不变，只是把
+     * "这条颜色属于哪条通道"从隐式（谁在读哪个 ThreadLocal）改成显式（传哪个 {@link Channel}）。
+     *
+     * 迁移说明：第 3 步把这三个 ThreadLocal 换成帧上下文时，**只要把这三个取值器换掉**，
+     * 通道定义与调用点都不用再动。
+     *
+     * 就绪判据沿用 {@code TransitionConfig.ensureLoaded()}：GUI 渲染可能发生在 Minecraft
+     * 尚未初始化时，那时不该读任何全局状态；它与 {@link TransitionConfig#ensureLoaded()}
+     * 内部那次 {@code synchronized} 只跑一次的行为一致（本类到处都在直接调用它）。
+     */
+    private static final Engine ENGINE = new Engine(
+            () -> {
+                guardConfigLoaded();
+                return (double) WINDOW_ALPHA.get();
+            },
+            () -> {
+                guardConfigLoaded();
+                return (double) TEXT_ALPHA.get();
+            },
+            () -> (double) PIP_FRAME_ALPHA,
+            UiTransitions::configLoadedOrNotNeeded);
+
+    /** 读任何 alpha 之前先把配置加载起来（与现有实现处处直接调它保持一致）。 */
+    private static void guardConfigLoaded() {
+        TransitionConfig.ensureLoaded();
+    }
+
+    /**
+     * 就绪判据。
+     *
+     * 刻意**永远返回 true**：现有实现的 {@code applyAlphaBlit} / {@code applyAlphaText}
+     * 本来就没有"未就绪就原样返回"的守卫，它们的 ThreadLocal 都有非 null 初值，
+     * 在 `ensureLoaded` 之前读也是安全且行为确定的（返回 1.0）。
+     * 若这里返回 false，反而会**改变行为**（把本该淡变的颜色原样返回）。
+     * 引擎保留这个钩子是为了第 3 步接入帧上下文时有一个明确的落点。
+     */
+    private static boolean configLoadedOrNotNeeded() {
+        return true;
     }
 
     private static int modulate(int color) {
+        return modulate(color, WINDOW_ALPHA.get());
+    }
+
+    /**
+     * 按 alpha 调制颜色。
+     *
+     * `premultiplied` 是**显式参数**，不再读那个全局的 `PREMULTIPLIED` 标志。
+     *
+     * 为什么改：原来这里读全局标志，而标志由 `beginItemSubmit` 置位 ——
+     * 于是**物品提交窗口内画出来的任何文字或矩形**都会被当成预乘颜色做 RGB 缩放。
+     * 它至今没暴露，只是因为恰好没有人在那个窗口里画文字（经核查：本方法只有
+     * `applyAlphaBlit` / `applyAlphaText` 两个调用者，物品那条渲染走的是另一条路）。
+     * 但这是**等触发的**结构缺陷：谁哪天在物品窗口里补一行文字就会中招，而且
+     * 表现是"颜色莫名偏暗"这种很难归因的现象。
+     *
+     * 现在判定跟着"这条颜色属于哪条渲染通道"走：
+     *   · 贴图块 / 纯色块 / 文字 → 非预乘（只改 alpha 通道）
+     *   · 物品图集 / 画中画贴回   → 预乘（RGB 一起缩放），由各自那条路显式传入
+     */
+    private static int modulate(int color, float alpha, boolean premultiplied) {
         try {
-            float alpha = WINDOW_ALPHA.get();
-            if (alpha >= 0.999F) {
-                return color;
-            }
-            int existing = (color >>> 24) & 0xFF;
-            // 透明度已经很低时直接归零：否则尾部几帧会残留一点亮度，看起来像在闪
-            if (alpha <= 0.04F) {
-                return 0;
-            }
-            if (PREMULTIPLIED.get()) {
-                // 预乘 alpha：RGB 必须一起缩放，否则元素会偏亮（物品尤其明显）
-                int r = Math.round(((color >> 16) & 0xFF) * alpha);
-                int g = Math.round(((color >> 8) & 0xFF) * alpha);
-                int b = Math.round((color & 0xFF) * alpha);
-                int a = Math.round(existing * alpha);
-                return (a << 24) | (r << 16) | (g << 8) | b;
-            }
-            int modulated = Math.max(0, Math.min(255, Math.round(existing * alpha)));
-            return (color & 0xFFFFFF) | (modulated << 24);
+            return ColorMath.apply(color, alpha, premultiplied);
         } catch (Throwable t) {
             report("modulate", t);
             return color;
         }
+    }
+
+    private static int modulate(int color, float alpha) {
+        return modulate(color, alpha, false);
     }
 
     /** GuiItemRenderState 构造完成时登记它当时的透明度 */
@@ -537,7 +689,13 @@ public final class UiTransitions {
             // 硬约束：物品的透明度不得超过本帧的动画透明度。
             // 渲染状态可能是动画开始前建立的（登记值偏大），若不夹住，
             // 收尾几帧物品会突然比周围更不透明 —— 看起来就是"闪一下"或发白。
-            float frame = FRAME_ALPHA.get();
+            //
+            // 这里必须用 PIP_FRAME_ALPHA 而不是 FRAME_ALPHA：
+            // 物品是在**渲染阶段**才从图集提交的，而 FRAME_ALPHA 在 endScreenFrame
+            // （提取阶段收尾）就被复位成 1 了 —— 用它等于"没登记过的物品一律全不透明"，
+            // 表现就是关闭动画里物品不跟着界面一起淡、留下一排残影。
+            // 画中画当初踩的就是同一个坑，见 PIP_FRAME_ALPHA 的注释。
+            float frame = PIP_FRAME_ALPHA;
             WINDOW_ALPHA.set(alpha == null ? frame : Math.min(alpha, frame));
             PREMULTIPLIED.set(true);       // 物品贴图是预乘 alpha
         } catch (Throwable t) {
@@ -674,7 +832,7 @@ public final class UiTransitions {
                 FRAME_ALPHA.set(1.0F);
                 return;
             }
-            float eased = TransitionConfig.openCurve().easeOut(progress);
+            float eased = curveFor(screen, TransitionConfig.Part.TAB).easeOut(progress);
             float base = slotFloorAlpha(screen, slotY);
             float alpha = base + (1.0F - base) * eased;
             WINDOW_ALPHA.set(alpha);
@@ -685,6 +843,13 @@ public final class UiTransitions {
     }
 
     public static void endSlotFade(int slotY) {
+        endSlotFade(slotY, false);
+    }
+
+    /**
+     * @param pinned true = 这一格是"固定原版"的那几格（玩家快捷栏/背包行）
+     */
+    public static void endSlotFade(int slotY, boolean pinned) {
         try {
             if (!SLOT_FADED.get()) {
                 return;
@@ -693,6 +858,18 @@ public final class UiTransitions {
             if (saved != null) {
                 WINDOW_ALPHA.set(saved);
                 FRAME_ALPHA.set(saved);
+            }
+            // **被固定的格子不参与"格子区上下界"的计算。**
+            //
+            // 原来这里无条件记录，于是玩家背包那几行（在物品网格**下方**）把下界拉到屏幕底部，
+            // 而滚动渐变是"离进入边越近越淡"：底部进入时，那几行离进入边最近，
+            // 按公式算出来就是**最淡的** —— 结果本该固定不动的行反而闪得最厉害。
+            // （用户反馈："那几行也跟着渐入渐出，还有闪烁"。）
+            //
+            // 它们本来就不参与滚动渐变（beginSlotFade 里 pinToVanilla 直接 return 了），
+            // 那就不该影响别人的边界。
+            if (pinned) {
+                return;
             }
             noteGridSlot(slotY);
         } catch (Throwable t) {
@@ -756,16 +933,40 @@ public final class UiTransitions {
         }
     }
 
-    /** 快捷栏：在换页动画期间保持原版观感（不跟着一起淡） */
+    /**
+     * 快捷栏：在换页动画期间保持原版观感（不跟着一起淡）。
+     *
+     * 注意必须把**所有**影响快捷栏的透明度来源一起冻住 —— 这里已经栽过两次：
+     *
+     *   · 第 1 次（1.4.0）：快捷栏物品走物品图集那条路。把 WINDOW_ALPHA 置回 1 之后
+     *     `tagItem` 认为"不用登记"，提交时取不到登记值就回退到 `PIP_FRAME_ALPHA` ——
+     *     它还是淡变中的值，于是快捷栏物品跟着一起淡。
+     *   · 第 2 次（1.5.01）：漏了 `TEXT_ALPHA`。快捷栏物品的**数量文字**走文字通道，
+     *     而 `TEXT_ALPHA` 由 `beginLayer` 设成"文字部位"的淡化值、只有帧末才复位 ——
+     *     于是图标不淡、**数字在淡**，看起来还是"快捷栏跟着一起渐变"。
+     *
+     * 教训：这里是一张"透明度来源清单"，**新增任何透明度来源都必须同步加进来**。
+     * 现在的清单：WINDOW_ALPHA / FRAME_ALPHA / PIP_FRAME_ALPHA / TEXT_ALPHA。
+     *
+     * `TAB_STATIC` 标志放在**最前面**置位：`applyAlphaText` 里还有别的乘子
+     * （聊天淡入），将来还可能再加。先立标志、后做事，才能保证"冻结期间任何乘子都不生效"。
+     */
     public static void pauseForTabStatic(GuiGraphicsExtractor extractor) {
         try {
-            if (FRAME_FADE_ALPHA >= 0.999F || TAB_STATIC.get()) {
-                return;
+            // 先立标志：哪怕下面的保存/复位出了岔子，本帧也不该再叠别的乘子
+            boolean alreadyStatic = TAB_STATIC.get();
+            TAB_STATIC.set(true);
+            if (alreadyStatic || FRAME_FADE_ALPHA >= 0.999F) {
+                return;       // 本来就不在淡变中，没什么可冻的（但标志留着，见上）
             }
+            TAB_STATIC_SAVED_PIP.set(PIP_FRAME_ALPHA);
+            TAB_STATIC_SAVED_TEXT.set(TEXT_ALPHA.get());
             WINDOW_ALPHA.set(1.0F);
             FRAME_ALPHA.set(1.0F);
-            TAB_STATIC.set(true);
+            TEXT_ALPHA.set(1.0F);
+            PIP_FRAME_ALPHA = 1.0F;
         } catch (Throwable t) {
+            TAB_STATIC.set(true);
             report("pauseForTabStatic", t);
         }
     }
@@ -775,6 +976,8 @@ public final class UiTransitions {
             if (!TAB_STATIC.get()) {
                 return;
             }
+            PIP_FRAME_ALPHA = TAB_STATIC_SAVED_PIP.get();
+            TEXT_ALPHA.set(TAB_STATIC_SAVED_TEXT.get());
             TAB_STATIC.set(false);
         } catch (Throwable t) {
             TAB_STATIC.set(false);
@@ -804,6 +1007,7 @@ public final class UiTransitions {
         try {
             FRAME_ALPHA.set(1.0F);
             WINDOW_ALPHA.set(1.0F);
+            TEXT_ALPHA.set(1.0F);
         } catch (Throwable t) {
             report("endScreenFrame", t);
         }
@@ -864,6 +1068,126 @@ public final class UiTransitions {
             PIP_SHIFT.set(0.0F);
             report("endPipBlit", t);
         }
+    }
+
+    // ================================================================== 聊天栏淡入
+
+    /**
+     * 聊天栏"新消息淡入"的计时与状态。
+     *
+     * 用**挂钟时间**：26.3 没有现成的"当前 GUI tick"可读（`Gui` 上没有 getGuiTicks，
+     * `Line.addedTime()` 的基准也拿不到），而"这一块聊天上次变化是什么时候"
+     * 本身就是最直接的信号。
+     */
+    private static volatile long chatFadeStartNanos;
+    private static volatile boolean chatFadeActive;
+    /**
+     * 本帧算好的聊天淡入系数。
+     *
+     * `applyAlphaText` 是**每次文字绘制**都会调的 —— HUD 一帧几十个文字元素。
+     * 如果在里面现算（`System.nanoTime()` + 曲线查表），聊天淡入的那 260ms 里
+     * 每帧要多算几十次，是白白多出来的开销。
+     * 所以改成"每帧开头算一次、之后都读缓存"（`beginChatRender` 里复位）。
+     */
+    private static volatile float chatFadeFrameAlpha = 1.0F;
+    /** 诊断计数：重开接续只打前若干次，避免刷屏 */
+    private static int DEBUG_REOPEN;
+    /** 上一帧聊天的"指纹"：行数与文字内容，用来判断有没有新消息进来 */
+    private static volatile int chatLineCount = -1;
+    private static volatile int chatContentHash;
+
+    /**
+     * 聊天开始绘制（ChatFadeMixin 注入在 ChatComponent.extractRenderState 的 HEAD）。
+     *
+     * 这里判断"是不是有新消息"，然后决定这一帧的透明度走不走淡入。
+     */
+    public static void beginChatRender() {
+        try {
+            // **只在真的处于淡入窗口里才介入**：这个标志会被每次文字绘制读到（applyAlphaText），
+            // 常开就等于给整帧的文字都加一次多余的乘法。淡完了就关掉，回到零开销。
+            chatFadeActive = isChatFadeConfigured() && chatFadeStartNanos != 0L
+                    && System.nanoTime() - chatFadeStartNanos < chatFadeNanos();
+            // 每帧只算一次系数：applyAlphaText 一帧要调几十次，不能每次都现算
+            chatFadeFrameAlpha = chatFadeActive ? computeChatFadeAlpha() : 1.0F;
+        } catch (Throwable t) {
+            chatFadeActive = false;
+            chatFadeFrameAlpha = 1.0F;
+            report("beginChatRender", t);
+        }
+    }
+
+    public static void endChatRender() {
+        // 不动 chatFadeActive：它由"是否还在淡入窗口里"决定，跨帧保持是刻意的
+    }
+
+    private static boolean isChatFadeConfigured() {
+        return TransitionConfig.enabled() && TransitionConfig.fade()
+                && TransitionConfig.chatFadeMs() > 0;
+    }
+
+    private static long chatFadeNanos() {
+        return TransitionConfig.chatFadeMs() * 1_000_000L;
+    }
+
+    /**
+     * 聊天栏新消息是不是正在淡入；是的话返回本帧该乘的系数（否则恒为 1）。
+     *
+     * **读缓存**，不现算：这个值一帧要取几十次（每次文字绘制），
+     * 真正的计算在 {@link #beginChatRender()} 里一帧一次。
+     */
+    public static float chatFadeAlpha() {
+        return chatFadeActive ? chatFadeFrameAlpha : 1.0F;
+    }
+
+    /** 真正的计算（一帧一次）：由 beginChatRender 调用，不要从绘制路径调 */
+    private static float computeChatFadeAlpha() {
+        try {
+            long start = chatFadeStartNanos;
+            if (start == 0L) {
+                return 1.0F;
+            }
+            long fadeNanos = chatFadeNanos();
+            long age = System.nanoTime() - start;
+            if (age >= fadeNanos) {
+                return 1.0F;
+            }
+            float progress = age / (float) fadeNanos;
+            return TransitionConfig.curveForCategory(TransitionConfig.UiCategory.CHAT).easeOut(progress);
+        } catch (Throwable t) {
+            report("computeChatFadeAlpha", t);
+            return 1.0F;
+        }
+    }
+
+    /**
+     * 记录当前聊天的"指纹"，变了就重新开始淡入。
+     *
+     * 指纹取"行数 + 内容哈希"：行数变了说明有新消息（或被删）；
+     * 内容哈希是为了覆盖"滚动、消息被替换"这些不改行数的情况 ——
+     * 宁可多淡一次，也不要"新消息直接蹦出来"。
+     */
+    public static void noteChatContent(int lines, int contentHash) {
+        try {
+            if (lines == chatLineCount && contentHash == chatContentHash) {
+                return;
+            }
+            chatLineCount = lines;
+            chatContentHash = contentHash;
+            if (isChatFadeConfigured()) {
+                chatFadeStartNanos = System.nanoTime();
+                chatFadeActive = true;
+            }
+        } catch (Throwable t) {
+            report("noteChatContent", t);
+        }
+    }
+
+    /** 换世界/重载界面时复位，避免拿着上一局的计时继续算 */
+    public static void resetChatFade() {
+        chatLineCount = -1;
+        chatContentHash = 0;
+        chatFadeStartNanos = 0L;
+        chatFadeActive = false;
     }
 
     // ================================================================== 判定与计算
@@ -1006,8 +1330,8 @@ public final class UiTransitions {
             return 0.0F;
         }
         float p = elapsed / (float) veilDurationNanos;
-        // 从全黑缓缓退到透明，用渐入曲线，手感与其它动画一致
-        return 1.0F - TransitionConfig.openCurve().easeOut(p);
+        // 从全黑缓缓退到透明；走「传送门」自己的曲线（没单独配就跟随全局渐入曲线）
+        return 1.0F - TransitionConfig.curveFor(TransitionConfig.Part.PORTAL, false).easeOut(p);
     }
 
     // ================================================================== 自绘预览用的透明度通道
@@ -1102,7 +1426,22 @@ public final class UiTransitions {
      * 曲线可以在配置里分开设，所以不能再统一读 TransitionConfig.curve()。
      */
     private static TransitionConfig.Curve curveFor(Screen screen) {
-        return CLOSING.containsKey(screen) ? TransitionConfig.closeCurve() : TransitionConfig.openCurve();
+        return curveFor(screen, TransitionConfig.Part.PANEL);
+    }
+
+    /** 按部位取曲线：部位没单独配就回退到"该界面所属分类"的曲线（再回退到全局） */
+    private static TransitionConfig.Curve curveFor(Screen screen, TransitionConfig.Part part) {
+        boolean closing = CLOSING.containsKey(screen);
+        String id = TransitionConfig.partCurveId(part, closing);
+        // 部位没单独配：优先用这一**类界面**的曲线，仍没配就回退全局（curveFor 内部会处理）
+        if (part != null && TransitionConfig.Curve.FOLLOW_ID.equals(id) && screen != null) {
+            TransitionConfig.UiCategory category = categoryOf(screen);
+            if (!TransitionConfig.Curve.FOLLOW_ID.equals(
+                    TransitionConfig.categoryCurveId(category))) {
+                return TransitionConfig.curveForCategory(category);
+            }
+        }
+        return TransitionConfig.curveFor(part, closing);
     }
 
     /** 当前"可见透明度"（关闭中递减、打开中递增），用于打断时接续 */
@@ -1185,8 +1524,10 @@ public final class UiTransitions {
 
     private static final float CONTENT_FADE_SPAN = 0.92F;
 
-    private static float alpha(Screen screen, float progress, boolean contentLayer) {
-        TransitionConfig.Curve curve = curveFor(screen);
+    private static float alpha(Screen screen, float progress, TransitionConfig.Part part) {
+        TransitionConfig.Curve curve = curveFor(screen, part);
+        boolean contentLayer = part == TransitionConfig.Part.ITEMS
+                || part == TransitionConfig.Part.TEXT;
         if (CLOSING.containsKey(screen)) {
             float span = 1.0F;
             if (contentLayer && TransitionConfig.staggerClose()) {
@@ -1283,6 +1624,18 @@ public final class UiTransitions {
     }
 
     /**
+     * 某个界面属于哪一类（聊天栏 / 创造物品栏 / 游戏菜单 / 容器 / 传送门 / 其它）。
+     *
+     * 分类决定"这一类界面用哪条曲线、多长时长"；没单独配过的分类会自动跟随全局，
+     * 所以老配置的行为完全不变。
+     */
+    private static TransitionConfig.UiCategory categoryOf(Screen screen) {
+        return screen == null
+                ? TransitionConfig.UiCategory.OTHER
+                : TransitionConfig.UiCategory.of(screen.getClass().getName());
+    }
+
+    /**
      * 渐入（打开）这一段动画的时长（纳秒）。
      *
      * 用 TransitionConfig 的上下限常量，而不是在这里另外写死一组数字 ——
@@ -1293,7 +1646,7 @@ public final class UiTransitions {
         if (isPortalLoading(screen)) {
             return millisToNanos(TransitionConfig.portalDurationMs(), durationFallback());
         }
-        return millisToNanos(TransitionConfig.openDurationMs(), durationFallback());
+        return millisToNanos(TransitionConfig.openDurationFor(categoryOf(screen)), durationFallback());
     }
 
     /** 渐出（关闭）这一段动画的时长（纳秒） */
@@ -1301,7 +1654,7 @@ public final class UiTransitions {
         if (isPortalLoading(screen)) {
             return millisToNanos(TransitionConfig.portalDurationMs(), durationFallback());
         }
-        return millisToNanos(TransitionConfig.closeDurationMs(), durationFallback());
+        return millisToNanos(TransitionConfig.closeDurationFor(categoryOf(screen)), durationFallback());
     }
 
     private static int durationFallback() {

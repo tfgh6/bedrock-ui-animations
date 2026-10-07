@@ -1,28 +1,29 @@
-# Bedrock UI Animations 1.0.1
+# Bedrock UI Animations 1.5.01
 
 为**容器 / 菜单界面**添加过渡动画：打开时自下而上滑入并淡入，关闭时向下滑出并淡出（基岩版手感）。
 **纯客户端**，同一个 jar 同时支持 **Fabric** 与 **NeoForge**。
 
 - 产物：**一个文件，两个加载器通用**
-  - uild/ui-transitions/Bedrock-UI-Animations-1.0.1-fabric+neoforge.jar（62,684 字节）
-  - 内含两套元数据：abric.mod.json + META-INF/neoforge.mods.toml，Fabric 与 NeoForge 各读自己那份，装同一个文件即可
-  - 版本约定：**每修一次 +0.01**（本次 1.0.1）
-- 图标：jar 内两处都有 —— ssets/ui_transitions/icon.png（128×128，8bit RGBA + 透明背景）与根目录 icon.png；
-  Fabric 走 abric.mod.json 的 icon，NeoForge 走 
-eoforge.mods.toml 的 logoFile。生成脚本：ui-transitions/make_icon.py
-- 注意：部分启动器看到 
-eoforge.mods.toml 就会把该文件标注为 NeoForge 模组（它自己的判定顺序，与能否加载无关）；
-  游戏内两个加载器都能正常加载。若确实需要启动器分类也正确，可用 uild_release.py 拆成两份（默认不这么做）。
+  - `build/ui-transitions/Bedrock-UI-Animations-1.5.01-fabric+neoforge.jar`
+  - 内含两套元数据：`fabric.mod.json` + `META-INF/neoforge.mods.toml`，Fabric 与 NeoForge 各读自己那份，装同一个文件即可
+  - **版本约定：每次 +0.01，按十进制进位** —— 1.5.0 → 1.5.01 → 1.5.02 … 1.5.09 → 1.5.10 → …
+    一个版本里可以包含多处改动（一批修复/功能算一版），但版本号只往前走一格。
+    本次 1.5.01 含：逐部位曲线 / 多点曲线 / 排除界面、手机端两处点击修复、
+    界面分类模型 + 聊天栏淡入（见 5.5 与 5.6 节）
+- 图标：jar 内两处都有 —— `assets/ui_transitions/icon.png`（128×128，8bit RGBA + 透明背景）与根目录 `icon.png`；
+  Fabric 走 `fabric.mod.json` 的 `icon`，NeoForge 走 `neoforge.mods.toml` 的 `logoFile`。生成脚本：`ui-transitions/make_icon.py`
+- 注意：部分启动器看到 `neoforge.mods.toml` 就会把该文件标注为 NeoForge 模组（它自己的判定顺序，与能否加载无关）；
+  游戏内两个加载器都能正常加载。若确实需要启动器分类也正确，可用 `build_release.py` 拆成两份（默认不这么做）。
 - 名称：显示名 **Bedrock UI Animations**；内部 modId 仍是 `ui_transitions`
   （不改 id 是为了不破坏你已有的 `config/ui-transitions.properties` 和 Sodium 选项键）
-- 图标：`ui-transitions/resources/assets/ui_transitions/icon.png`（128×128，**8bit RGBA + 透明背景**）
-  —— Fabric 用 `fabric.mod.json` 的 `icon`、NeoForge 用 `neoforge.mods.toml` 的 `logoFile`；
-  同一个文件另外在 jar **根目录**也放了一份 `icon.png`，兼容只扫根目录的启动器。生成脚本：`ui-transitions/make_icon.py`
 - 作者：**KurumiのZaphkiel**、**JiaWang-sama**
 - 目标：Minecraft **26.3**（Fabric Loader ≥ 0.16 / NeoForge 26.3）
 - 源码：`ui-transitions/src/` · 元数据：`ui-transitions/resources/` · 打包：`ui-transitions/build_jar.py`
 - Gradle 工程：`ui-transitions/`（Loom 1.18 + Gradle 9.7.1 + JDK 25）
 - 实机截图：`build/visual-out/`（四态对比图 `montage2.png`）
+- 版本号写在三处，**必须一起改**：`resources/fabric.mod.json`、`resources/META-INF/neoforge.mods.toml`、`gradle.properties`
+  —— `build_jar.py` 会校验 `fabric.mod.json` ↔ `neoforge.mods.toml` ↔ MANIFEST 三者一致，漏一处直接打包失败。
+  （`gradle.properties` 的 `mod_version` 只有 Gradle 那条旁路用，构建脚本读不到它，属于"改了不会报错但会不一致"的一处。）
 
 ---
 
@@ -79,9 +80,22 @@ eoforge.mods.toml 就会把该文件标注为 NeoForge 模组（它自己的判�
 | `overlayModsFadeOnly` | `true` | — | 装了 JEI / EMI / REI 时改为**只淡变不位移**，让它们叠在容器界面上的固定按钮留在原地 |
 | `extraScreens` | `mezz.jei,dev.emi.emi,me.shedaniel.rei` | — | 额外适配的界面（类名或包名前缀，逗号分隔），默认已含 JEI / EMI / REI |
 | `excludedScreens` | 空 | — | 排除的界面类名，逗号分隔 |
+| `curve.<部位>.<open\|close>` | `default` | 见下 | **按部位单独配曲线**（1.5.0 起）。`default` = 跟随全局；写曲线 id 就是单独设。部位 id：`panel` / `dim` / `items` / `text` / `subtitles` / `tab` / `portal` |
+| `curveCustom.<部位>.<open\|close>` | 空 | — | 该部位的自定义形状。贝塞尔是 `x1,y1,x2,y2`；多点曲线是 `x,y;x,y;…`（靠 `curve.<部位>` 的 id 决定怎么解析） |
+
+> **按部位分曲线只在"不跟随全局"时才写进文件**，所以老配置不会被二十几行 `default` 淹没，
+> 升级后行为与之前完全一致（全部跟随全局）。
 
 装了 Mod Menu + Cloth Config 时，以上选项都有图形界面（模组列表 → UI Transitions → 配置），
 分「动画 / 淡入淡出细节 / 参与动画的部分 / 方向 / 兼容性」五页，改动即时保存。
+
+配置入口之上还有一层**入口页**（同一个「配置」按钮进的就是它），四个按钮：
+
+| 按钮 | 作用 |
+| --- | --- |
+| 界面动画设置 | 上面那个 Cloth 配置页 |
+| 曲线编辑器 — 渐入 / 渐出 | 三列的曲线编辑器：左图（+ 贝塞尔模式下的四个滑块）、中间实机预览、右「动画列表」 |
+| 排除的界面 | 双列表：左「最近见过的界面」、右「已排除」，点一下即移动 |
 
 ---
 
@@ -243,27 +257,343 @@ Java 25，由脚本直接按版本 JSON 启动；测试用 `-Duitransitions.visu
 
 结论：**Fabric 路径已在真实游戏里端到端验证通过**（加载 → 注入 → 底板+内容动画 → 遮罩静止 → 收尾），
 新增的独立开关与图形化设置界面也都实测有效。
-NeoForge 侧只做了结构性验证（元数据 + 相同的 Mixin 配置 + 不使用任何加载器 API），未实际启动过 NeoForge。
+
+### NeoForge 路径（1.4.1 起已实机验证）
+
+**2026-10-06 更新**：NeoForge 侧已经在真实环境里启动验证通过，不再是"只做结构性验证"。
+
+验证方式见 `neotest/neoforge_test.py`：它按版本 JSON 拼出完整启动命令，
+在**独立的测试游戏目录**里启动真实的 NeoForge 客户端，然后核对日志。
+实测输出（NeoForge 26.3.0.48-beta / Cloth Config 26.3.159）：
+
+```
+Mod List:
+    Bedrock UI Animations 1.4.1 (ui_transitions)
+    Cloth Config v26.3 API 26.3.159 (cloth_config)
+    Minecraft 26.3 (minecraft)
+    NeoForge 26.3.0.48-beta (neoforge)
+
+[Bedrock UI Animations] NeoForge 入口：已检测到 Cloth Config
+[Bedrock UI Animations] 已注册 NeoForge 配置入口（模组列表里的配置按钮）
+[UI Transitions] 配置已加载 (…/config/ui-transitions.properties) enabled=true open=500ms/cubic …
+[UI Transitions] 切屏: (无) -> GenericMessageScreen
+[UI Transitions] 不做动画: GenericMessageScreen —— 不是容器界面，也不在额外适配列表里
+```
+
+> 顺带说明：模组的日志走 `System.out`，**不会进 `logs/latest.log`**（那里面只有 Log4j 的输出）。
+> 脚本必须另外抓进程的 stdout，否则永远等不到成功标记 —— 这点踩过。
+
+### 两次教训（都写进了流程，不靠自觉）
+
+**① 桩类编译通过 ≠ NeoForge 能跑。**
+
+`tools/compile.py` 在拿不到 NeoForge 开发期 API 时会生成桩类做类型检查。
+但桩类是**我们自己写的**，它只能证明"类型对得上"，证明不了方法签名、
+包路径、以及 jar 会不会被 FML 接受。
+
+1.3.0~1.4.0 的每个包都因为**桩类被打进 jar**（`net/neoforged/**`，触发 JPMS 包冲突）
+而在 NeoForge 上完全无法启动，而构建日志一路绿灯 —— 只有一句"兼容性未验证"的警告飘过去。
+
+现在：编译**优先使用本机真实 NeoForge API**（从 `libraries/` 里自动找
+`neoforge-*-universal.jar` + FML loader + bus + mergetool），找不到才退回桩类，
+并且会明确打印用的是哪一种。
+
+**② 这类问题必须让构建直接失败，不能只警告。**
+
+`build_jar.py` 新增硬闸：产物里只要出现 `com/uitransitions/` 之外的 class 就
+**中止打包并退出非 0**。已用故意制造的污染验证过确实会拦下。
+
+---
+
+## 5.5 逐部位曲线 / 多点曲线 / 排除列表（1.5.0 起）
+
+三块功能：**每个部位一条自己的渐入渐出曲线**、**鼠标拖点画曲线**、**点选式排除界面**。
+
+### 5.5.1 做了什么
+
+| 块 | 内容 |
+| --- | --- |
+| 按部位分曲线 | `TransitionConfig.Part`：底板 / 变暗遮罩 / 物品 / 文字 / 音效字幕 / 分类标签 / 传送门遮罩。每个部位 × 渐入渐出各一条曲线 id + 自定义点集（两个 `EnumMap`，不是 28 个字段）。默认全部 `default` = **跟随全局**，所以老配置行为完全不变 |
+| 多点曲线 | 除了四个贝塞尔控制点，还能切到"多点"：图上点一下加点、按住拖、双击删（或 Delete），首尾固定。点集与贝塞尔控制点**共用** `*CurveCustom` 字段，靠 `curve` id 决定怎么解析 |
+| 动画列表 | 曲线编辑器右列 = 全局 + 7 个部位共 8 行。点行名切编辑对象，点行首小方框在"跟随全局 / 单独设置"之间切换 |
+| 排除的界面 | 独立界面（入口页第 4 个按钮）：左"最近见过的界面"、右"已排除"，点一下即移动 |
+
+配置文件新增的键只有 `curve.<部位>.<open\|close>` 与 `curveCustom.<部位>.<open\|close>`，
+而且**只写不跟随全局的那些**，老配置文件不会被 28 行 `default` 淹没。
+
+### 5.5.2 这一轮踩到的坑（都是真实发生过的）
+
+**① 输入框里"能点"和"算数"是两件事 —— 只灰一个按钮等于骗人。**
+
+部位"跟随全局"时不该能改它的形状。第一版只把「多点/控制点」按钮设成 `active=false`，
+**滑块、重置按钮、图上的手柄全都还能动** —— 而 `save()` 第一行就是
+`if (!editable()) return;`，所以用户拖半天，点「完成」时全部无声消失。
+现在四处一起灰掉，并且跟随全局时**不画手柄**：那时图上画的是全局那条曲线（灰的），
+把手柄画上去会落在与曲线对不上的位置，看着能拖、其实不算数。
+
+**② 用"另一列的位置"算自己的宽度时，赋值顺序就是正确性。**
+
+预览宽度是 `listX - 14 - previewX` 算出来的，而那段代码一度把 `listX` 写在 `previewWidth`
+**后面** —— 首次 `init()` 读到的是字段默认值 0，于是预览被 `max(110,…)` 兜成一条窄带；
+`buildWidgets()` 开头又把 `widgetsDirty` 清掉，首帧不会重建，用户一进界面看到的就是窄预览，
+只有切一次模式或改窗口大小才恢复。这类链式布局，顺序错了不会报错，只会难看。
+
+**③ 别写死"够大"的阈值 —— 实机分辨率比想象的小得多。**
+
+右列原本的条件是 `width >= 560`。实机跑起来（GUI 缩放 3 档、1280×720 窗口）
+逻辑分辨率只有 **427×240**，于是动画列表**一次都没显示过**，用户根本看不到新功能。
+现在门槛按"三列各自的最小宽度加起来"算，427×240 下正好放得下（图 56 / 预览 194 / 列表 128）。
+同理，四个底部按钮原本按 `(width-32-24)/4` 再取 56 的下限，427 宽下会**互相压住**；
+现在按下限 52 算，并把中英标签都压到四个字以内。
+
+**④ 数值被夹到"刚好等于判据"时，功能会静默消失。**
+
+插入点的 x 会被夹进 `[MIN_POINT_X, MAX_POINT_X]`，而插入前还要检查"与已有点至少隔开
+`MIN_POINT_GAP`"。原先边界只留**一个** gap，于是夹完正好贴着端点、被判成"太近"拒绝插入 ——
+**贴着图左右边缘的点击永远加不进点**。夹对了、却什么也没发生，这种最难查。
+现在边界留两个 gap。这条是离线断言（喂一个越界坐标）抓出来的，肉眼绝对看不出来。
+
+**⑤ "按旧 id 判断类型"会写出自相矛盾的配置。**
+
+贝塞尔控制点和多点曲线共用同一个 `curveCustom` 字段，而界面允许**同一次编辑里改变类型**
+（多点 ↔ 控制点）。`setPartCurveCustom` 第一版只看"这一项当前是不是 multi"：
+从多点切回控制点保存时，id 仍是 `multi`、值却写成了贝塞尔格式 →
+之后按 multi 解析得到空点集 → **曲线静默变成一条直线**。
+现在类型**按值的格式推断**（含 `;` 就是多点，否则是四点贝塞尔），两种格式不可能混淆。
+
+**⑥ 断言里的"预期值"也会写错 —— 而且错得比代码更像代码。**
+
+多点编辑的离线断言第一版有三处是**测试自己错**：拿一个"先上后下"的点集去断言单调递增；
+拿越界到正好夹在端点上的坐标去断言"应该加点"；以及前一轮 `excludedWorks` 留下的
+`excludedSet` 缓存让被测界面被判成"不参与动画"，于是两层 alpha 都读到稳定态。
+现在的写法是：取样数据自己先保证单调、夹取用真的落在内部的值、
+关键断言前显式确认"这个界面确实参与动画"。
+
+**⑦ 自己写的检查要能被证伪，否则等于没有。**
+
+`check_lang.py` 新增动态键豁免后，我故意从 `zh_cn.json` 里删掉一个键跑了一遍 ——
+必须报错才算这个豁免没写坏（第一次改动就漏了：豁免只在"孤儿键"那一条生效，
+"缺失键"那条仍然会红灯）。凡是新增/修改检查逻辑，都该这样反向验一次。
+
+**⑧ `javac` 会把 `static final` 常量内联进调用方，改了常量不重编就还是旧值。**
+
+排查上面第 ④ 条时，我写了个小探针打印 `MIN_POINT_X`，改了源码、重编了模组，
+探针却一直打印旧值 —— 因为**探针类自己没有重编**，旧值已经被内联进它的字节码了。
+误判方向差点跑到"是不是有另一份 class 在前面"。结论：验证脚本改了常量之后，
+相关的 class 必须一起重编（`run_verify.py` 每次都会重编核心类，所以它是对的）。
+
+**⑨ 截图证明不了"点得到"。**
+
+配置界面里的曲线编辑器条目渲染完全正常、直接派发点击也能开，**真实鼠标点击却传不到**；
+曲线编辑器的预览宽度算错也是只有点一下才暴露（见 ②③）。
+所以实机检查里加了 `curveui` 阶段：真的派发点击、真的切模式、真的加点删点，
+并把布局数字打出来核对（`预览宽=110 而可用宽度=288` 这种一眼可见的错误）。
+
+**⑩ 测试里的行号/坐标写错，看起来和代码坏了完全一样。**
+
+`curveui` 阶段这个检查前后返工了三轮，**三次都是测试自己错**：
+
+| 返工 | 现象 | 真实原因 |
+| --- | --- | --- |
+| 1 | 「点第 3 行 → 得到 DIM」 | 断言写的是 ITEMS，而按行序第 3 行确实是 DIM —— 我把 `Part` 枚举顺序记错了 |
+| 2 | 同上，改成第 2 行又得到 PANEL | 行 y 用 `(row-0.5)×22` 算，正好落到上一行 |
+| 3 | 「点一下没加点」 | 上一局把曲线拖过了、图上有 5 个点，随手点的位置"离已有点太近"被**合理地**拒绝 |
+
+教训：**几何要么从运行时读出来，要么先扫一遍打印**。现在这一阶段的日志里有
+`列表几何：可见行数=6 行高=22 首行 y=74`，以及逐行扫描的 `扫行 y=106 -> PANEL ✅` ——
+下一轮再出问题，看一眼日志就知道是行几何错还是功能错，不用再猜。
+
+**⑪ 鼠标键号：26.3 的 `isValidClickButton` 判的是 `button() == 1`，不是 0。**
+
+写"点击按钮"的检查时，我用 `new MouseButtonInfo(0, 0)` 造事件，
+结果每个按钮的 `mouseClicked` 都返回 false、界面纹丝不动 ——
+**看起来像"入口页三个按钮全坏了"**，实际是我们造的事件被控件判成"不是有效键"直接拒绝。
+（用 `javap` 看 `AbstractWidget.isValidClickButton` 的字节码才确认：`button() == 1`。）
+排查过程中先单独调了一次 `onPress`，界面立刻正常打开 —— 这一步把
+"鼠标事件链路被拒"和"回调本身没生效"彻底分开了，否则很容易去改根本没错的模组代码。
+
+**⑫ 顺带发现两个"检查自己坏了"的问题（假红与假绿各一个）。**
+
+- **假红**：`configclick` 阶段在找 `CurveEditorEntry` —— 那个 Cloth 自绘条目**早就删掉了**
+  （入口改成入口页原版按钮的原因见 `UiTransitionsHubScreen` 的注释）。
+  它每次运行都 ❌，看起来像功能坏了。现在换成 `hub` 阶段：点入口页的每个按钮，
+  看开出来的界面类名对不对 —— 那才是用户真正走的那条路。
+- **假绿**：`visual_test.py` 的汇总只挑含"失败/警告/根因"的日志行，
+  而驱动里大量判定是**打 ❌ 符号**的。于是那一次 `configclick` 明明 ❌ 了，
+  汇总却打印"（没有失败/警告）"，全靠去看截图文件名才发现。
+  现在汇总同时认 ❌，并打印"驱动共做出 N 条带结论的检查"，让"一条都没做"和"全都通过"不再同形。
+
+**⑬ `AbstractWidget.setRectangle` 是 `(x, y, 宽, 高)` —— 参数顺序搞反了一次。**
+
+新界面的双列表左半边一直**看不见**。查出来自定义列表控件的 `layout(x, y, w, h)`
+里写成 `setRectangle(x, y, w, h)`、却按 `(x, y, x2, y2)` 理解，
+于是位置被设成 `(宽, 高)`、尺寸被设成 `(x2-x, y2-y)`：左列表落在 `(191,128)`、**宽只有 16 像素**。
+看起来就是"根本没画出来"。现在改用 `setPosition` + `setSize` 分开写，
+不再有和矩形坐标混淆的机会。同一轮还修掉了：`MIN_LIST_WIDTH` 下界会把列表顶出屏幕、
+标题/副标题没有按宽度截断（文字越过边框）、底部状态行压在列表与按钮上。
+
+---
+
+## 6. 自行构建 / 复现验证
+
+### 5.5.3 实机验收（1.5.0 起，Fabric 26.3）
+
+`visualtest/visual_test.py --phases curveui`，真实游戏 + 真实鼠标事件派发：
+
+```
+布局：界面=427x240 图=64@x16 预览=175@x94 列表x=283 显示列表=true 预览右缘到列表=14
+布局检查：预览宽度正常 ✅
+列表几何：可见行数=6 行高=22 首行 y=74 滚动=0
+  扫行 y=106 -> PANEL（第 1 行） ✅
+  扫行 y=128 -> DIM（第 2 行） ✅
+  扫行 y=150 -> ITEMS（第 3 行） ✅
+点第 3 行(y=150)：部位 -> ITEMS  ✅
+点小方框：own false -> true  ✅（已单独设置）
+切模式前：own=true multiMode=true
+加点模式：点空白处 2 -> 3  ✅
+切到移动模式：moveMode=true  ✅
+移动模式：点选式移动 x 0.35 -> 0.70 点数 1->1  ✅   ← 不依赖拖动的那条路
+Delete 删点（鼠标指向 0.70,0.70 → 像素 61,63）：点数 3 -> 2  ✅
+列表滚轮：返回=true 顶部行 0 -> 1
+```
+
+> 手机端（Zalith / arm64）的两处"点不动"就是靠这一阶段暴露并修掉的，见 5.6。
+
+---
+
+## 5.6 界面分类 + 聊天栏淡入（1.5.01）
+
+### 5.6.1 新增：界面分类（`UiCategory`）
+
+聊天栏 / 创造物品栏 / 游戏菜单 / 容器界面 / 传送门 / 其它，共 6 类。
+
+- **分类决定"这一类界面用哪条曲线、多长时长"**；部位（底板/物品/文字…）决定"这一屏里某一层怎么淡"。
+  两者正交：分类是"哪一类界面"，部位是"屏幕内的哪一层"。
+- 全部默认**跟随全局**，所以老配置行为完全不变。
+- 按**类名**判定（不 import 具体界面类）：原版以后改包名、加新界面，最多归到"其它"，不会编译不过。
+- 时长用 `readOptionalInt` 读取：能区分"没配过"与"配成了和全局一样"——
+  否则界面上永远显示不出"跟随全局"（两者会被压成同一个值）。
+
+### 5.6.2 新增：聊天栏新消息淡入
+
+HUD 上的聊天栏来新消息时整块淡入一次。**这是一条全新的动画**（以前消息是"啪"地直接出现）。
+
+| 注入点 | 做什么 |
+| --- | --- |
+| `Hud.extractChat` | 每次渲染记"聊天内容指纹"（行数 + 最近条数），变了就重新开始计时 |
+| `ChatComponent.extractRenderState` | 画聊天那一段把透明度乘上淡入系数 |
+
+透明度走**已有的文字通道**（`GuiTextRenderStateMixin → applyAlphaText`），
+不复制任何原版排版逻辑；`chatFadeActive` 只在淡入窗口内为真，平时零开销。
+配置项 `chatFadeMs`（默认 260，**0 = 关闭**）。
+
+**必须说清的取舍**：现在是"新消息出现时**整块**聊天快速淡入一次"，
+**不是逐条交错**的淡入。逐条需要按行施加透明度，而那要挂在
+`ChatComponent.forEachLine` 的透明度回调上 —— 它的参数类型 `ChatComponent$AlphaCalculator`
+是**私有**嵌套类型，签名里写不出来。
+
+### 5.6.3 这一轮踩到的坑（都写进了流程）
+
+**① 产物纯净性硬闸拦住了我自己。** 为了挂上面那个私有类型，我把 mixin 放进了
+`net.minecraft.client.gui.components` 包（mixin 的标准做法）。打包时被拦下：
+
+```
+产物里混入了非本模组的 class：net/minecraft/client/gui/components/ChatComponentFadeMixin.class
+产物被污染，已中止打包
+```
+
+**闸拦对了** —— 往 `net/minecraft` 下放类正是 1.3.0~1.4.0 让 NeoForge 因 JPMS 包冲突
+拒绝启动的原因。已撤销，改挂两个 public 方法。
+
+**② 自绘区域的点击会被控件抢先消费。** `mouseClicked` 原本第一行是
+`if (super.mouseClicked(...)) return true;`，而 `super` 只要**任一控件**消费掉这次点击
+就返回 true —— 于是"自己画、自己判命中"的区域（动画列表、曲线图）永远轮不到。
+表现是"入口页的原版按钮点得动，我自己画的点不动"。改成**先判自绘区域、不是才交给控件**。
+
+**③ 拖动在手机上不可靠，这条已经踩第二次。** 26.3 只在真的按住拖动时才送
+`mouseMoved`/`mouseDragged`，这套合成在触屏上不可靠（上一个会话已经因此给每个数值配了
+原版滑块）。多点编辑当时只做了拖拽，所以手机上等于没有。现在做成三态循环
+（控制点 → 多点·加点 → 多点·移动），移动是"点哪里就挪到哪里"，**完全不依赖拖动**，
+另配 x/y 两个原版滑块做微调。
+
+**④ 在渲染线程里 sleep 等"控件重建"，等于把渲染线程堵死。** 测试里为此反复误判成
+"按钮回调坏了"：`minecraft.execute(...)` 里的 lambda 跑在渲染线程，在里面
+`sleep` 等下一帧永远不会到（实测 16 秒一帧没跑）。**等待一律放驱动线程**。
+另外别拿"一帧≈100ms"当假设 —— 软件渲染下这台机器一帧能到一秒。
+
+**⑤ 矩阵 push/pop 失衡（真 bug，已修）。** `beginLayer` 在 `fade` 关闭时只弹不压，
+会让整条渲染管线的矩阵栈错位（后果包括把裁剪区算成 0 高而崩在渲染阶段）。
+现在压栈改为无条件。
+
+**⑥ 空矩形裁剪（真风险，已堵）。** 26.3 的裁剪是**延迟下发**的：`enableScissor`
+只记录，真正下发时才校验（`Scissor size must be >0`），所以崩的是"这一帧稍后的绘制"、
+堆栈里看不到调用者。两处 `enableScissor` 统一改走 `StackedTextList.beginClip`
+（算不出正的宽高就不裁）。
+
+
+**427×240 是这台机器上 GUI 缩放 3 档时的逻辑分辨率** —— 而且这正是**最常见**的那种配置：
+原版自动缩放（`guiScale:0`）在 1280×720 窗口下会选 3 档（它取"逻辑分辨率仍不小于 320×240"的最大档位），
+得到的就是 427×240。所以这不是边角情况，而是普通桌面窗口的默认观感。
+正是它暴露了"列表门槛写成 560、于是新功能一次都没显示过"这个问题（见 5.5.2 ③）。
+
+这一阶段还顺带量了字宽并**直接判定**（不只打印）：
+`读数排版：单行宽=124 阈值=124 图宽=64 → 两行 ✅` —— 因为"相等也算放得下"这个等号写错，
+读数曾经被截成 `P1 0.25,0.10 P2`（截图里一眼可见）。现在这种截断会直接反映在日志的判定上。
+
+可见行数 6 < 8 行，所以"分类标签/传送门"两项必须滚动才能选到 —— 这也是加滚轮 + 上下键的原因。
+
+**入口页与排除界面**（`--phases hub`，真派发点击）：
+
+```
+点「界面动画设置」  -> ClothConfigScreen              ✅
+点「曲线编辑器 — 渐入」-> UiTransitionsCurveScreen     ✅
+点「排除的界面」    -> UiTransitionsExclusionsScreen  ✅
+排除界面几何: 界面=427x240 左列表=16,34 191x128 右列表=219,34 191x128
+```
+
+排除界面实测截图里左边列出 6 个"最近见过的界面"（`TitleScreen` / `ClothConfigScreen` /
+三个本模组界面等），右边为空并提示"一个都没排除" —— 与配置里的实际状态一致。
+
+### 5.5.4 这一轮仍然没解决 / 需要继续盯的
+
+| 项 | 说明 |
+| --- | --- |
+| **超大物品图标只淡不滑** | `OversizedItemRendererMixin` 只接了透明度、**没有对应的位移注入**（主画中画那条路有）。所以个别大图标会跟着淡、但不跟着面板滑。没实机复现过，先记在这里 |
+| **部位 + 贝塞尔模式的预览** | 已修成实时（原来只有多点模式实时），但只有实机肉眼能确认手感 |
+| **排除界面的前缀删除** | 右边点一下是**整条删除**（不做"反查是哪条规则覆盖了它"）。一个包名前缀覆盖很多界面，反查出来的可能不是用户点的那条 —— 删错比删不掉更难解释。这个取舍写在类注释里 |
+| **`fabric/` 里的共用界面类不受 `check_shared_code.py` 保护** | 那个脚本按**目录**豁免（`fabric/` 允许用 `net.fabricmc.*`），而 Hub / 曲线编辑器 / 排除界面 / 列表控件虽然是共用代码却都放在 `fabric/` 下。历史那次"NeoForge 上配置页空白"的 bug 放到今天仍能过闸，现在只靠类注释约定 |
+| **`@ModifyVariable` 靠 ordinal 定位，工具不校验** | `check_mixins.py` 能证明"注入点存在"，证明不了"ordinal 指向的参数还是颜色"。构造器参数一旦增删换序，构建仍全绿，但会把 x0/y0 当颜色去乘 alpha —— 那不是失效，是**画错** |
 
 ---
 
 ## 6. 自行构建 / 复现验证
 
 ```powershell
-# A. 离线：编译 + 打包（依赖路径集中在 tools\compile.py，不用手拼 classpath）
+# 一键跑完全部离线关卡（发版前必须全绿）
+& '<python>' tools\verify_all.py
+& '<python>' tools\verify_all.py --neoforge   # 连真实 NeoForge 实机启动一起跑
+
+# 各关卡也可以单独跑：
 & '<python>' tools\compile.py            # 编译到 build\ui-transitions\classes
-& '<python>' ui-transitions\build_jar.py # 元数据自检 + 核对 Mixin 注入目标 + 打包
+& '<python>' ui-transitions\build_jar.py # 元数据自检 + 核对 Mixin 注入目标 + 产物纯净性 + 打包
 & '<python>' ui-transitions\build_release.py   # 可选：拆成 Fabric / NeoForge 两个发布 jar
 
-# B. 离线：Mixin 注入目标核对（defaultRequire=0，没命中只会静默失效）
+# 离线：Mixin 注入目标核对（defaultRequire=0，没命中只会静默失效）
 & '<python>' tools\check_mixins.py       # 解析 class 文件，核对每个注入点是否真的成立
 
-# C. 离线：状态机断言（桩类的 gameDirectory 落在临时目录，不会写到仓库里）
+# 离线：状态机断言（桩类的 gameDirectory 落在临时目录，不会写到仓库里）
 & '<python>' tools\run_verify.py         # 编译并运行 verify-uit 下的全部断言
 
-# D. 实机可视化测试（推荐用它，下面那条是它的底层）
+# 实机：真实 NeoForge 客户端启动（需要机器上装了 NeoForge）
+& '<python>' neotest\neoforge_test.py            # 全自动：找安装 + 建测试目录 + 启动 + 核对日志
+& '<python>' neotest\neoforge_test.py --list     # 只列出找到的 NeoForge 安装
+& '<python>' neotest\neoforge_test.py --keep     # 保留现场（测试目录与日志）
+& '<python>' neotest\neoforge_test.py --mc <目录> --version <版本> --jar <包>
+
+# 实机可视化测试（Fabric 路径，推荐用它，下面那条是它的底层）
 & '<python>' visualtest\visual_test.py                  # 全流程：编译 + 打包 + 启动 + 抓帧 + 汇总
 & '<python>' visualtest\visual_test.py --phases curve    # 只验曲线编辑器（不用建世界，快）
+& '<python>' visualtest\visual_test.py --phases curveui  # 只验曲线编辑器的**交互**（真点击 / 加点 / 删点）
 & '<python>' visualtest\visual_test.py --list           # 看有哪些阶段
 
 # D'. 底层启动器（visual_test.py 内部就是调它）
@@ -290,8 +620,9 @@ NeoForge 侧只做了结构性验证（元数据 + 相同的 Mixin 配置 + 不�
 | --- | --- | --- |
 | `panels` | 合成面板开/关动画、稳定态、`animatePanel=false` 对照、字幕探针 | 否 |
 | `config` | Cloth 图形化配置界面 | 否 |
-| configclick | 配置界面里「打开曲线编辑器」入口能不能点开（只有交互才暴露的问题） | 否 |
+| `hub` | 入口页的按钮能不能把各自的界面打开（真派发点击；替代了已失效的 `configclick`） | 否 |
 | `curve` | 曲线编辑器（渐入 / 渐出两页） | 否 |
+| `curveui` | 曲线编辑器的**交互**：核对布局宽度、点动画列表换编辑对象、切「跟随/单独设置」、切多点模式、图上加点、滚轮翻页、Delete 删点 | 否 |
 | `world` | 只进世界并抓一张 | 是 |
 | `inventory` | 生存背包：玩家小模型（画中画）是否跟着界面动 | 是 |
 | `enchant` | 附魔台：附魔书（画中画）是否跟着动、有没有被裁 | 是 |
@@ -327,8 +658,12 @@ B 这一步针对的是本项目最容易踩的坑：mixin 配置写的是 `defa
 
 1. **仅在 MC 26.3 上验证**。26.3 之后若原版改动 GUI 渲染管线（渲染状态类构造器签名），相关注入会失效；
    因为做了优雅降级，表现是"没有动画"而不是崩溃，日志里会有 Mixin 告警。
-2. **NeoForge 未实机启动过**（本机只有 1.21.1 的 NeoForge 实例）。该模组不使用任何加载器专有 API，
-   元数据也按官方规范书写，理论上一份 jar 可直接用；若 NeoForge 侧有问题请把日志发我。
+2. ~~**NeoForge 未实机启动过**~~ —— **已在 1.4.1 起实机验证，1.5.01 再次确认**。
+   本机现在有 26.3 的 NeoForge 实例（26.3.0.48-beta + Cloth Config 26.3.159），
+   `neotest/neoforge_test.py` 会真的启动客户端并核对日志。
+   最新一次结果：`结果: PASS —— 模组在真实 NeoForge 26.3.0.48-beta 上加载成功`，
+   命中标记 `已注册 NeoForge 配置入口`。跑法：`tools/verify_all.py --neoforge`。
+   注意**只证明"能加载、配置入口注册成功"**，不验画面。
 3. **哪些是"看图验证"、哪些是"逻辑验证"**，说清楚免得误会：
    - **看图验证**（实机截图）：底板与内容一起滑动/淡变、关闭动画、动画结束后静止、`animatePanel=false` 时底板静止、配置界面各选项。
    - **逻辑验证**（离线断言 + 注入验收）：音效字幕抵消、`fadeDim` 遮罩淡出、各类独立开关、曲线切换、打断接续。
@@ -338,9 +673,10 @@ B 这一步针对的是本项目最容易踩的坑：mixin 配置写的是 `defa
      这两处在你的手机上打开背包时应能直接验证；若字幕仍跟着动，请把界面名与配置发我。
 4. **JEI / REI / EMI 只做了逻辑验证**：按类名/包名前缀匹配（默认 `mezz.jei,dev.emi.emi,me.shedaniel.rei`），
    本机没有安装这些模组，无法实测它们的界面。若某个界面没跟上或不该动，用 `extraScreens` / `excludedScreens` 增删即可，把类名发我我也可以内置默认值。
-5. **两个图形配置入口**：Fabric 侧用 Mod Menu + Cloth Config；Sodium 侧用其官方配置 API 注册整页。
-   NeoForge 侧由 `UiTransitionsNeoForge` 通过 `IConfigScreenFactory` 注册同一个界面，
-   但**未在真实 NeoForge 环境里启动验证过**（本机没有 26.3 的 NeoForge 实例）。
+5. **图形配置入口分三处**：Fabric 侧用 Mod Menu + Cloth Config；Sodium 侧用其官方配置 API 注册整页；
+   NeoForge 侧由 `UiTransitionsNeoForge` 通过 `IConfigScreenFactory` 注册同一个入口页。
+   三处指向的都是**同一个入口页**（`UiTransitionsHubScreen`），所以曲线编辑器与排除界面两边都能进。
+   NeoForge 侧的注册已实机确认（见第 2 条）；但**按钮点开之后的画面没有在 NeoForge 上逐一看过** ——
    Mixin 与动画本身与加载器无关，两个加载器共用同一份实现。
 6. **关闭动画依赖"拦下切屏再补做"**：若玩家在动画进行中退出世界/切服务器，最坏情况是个别界面状态残留；
    动画仅 300ms，实际几乎遇不到。

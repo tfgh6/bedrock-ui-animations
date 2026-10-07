@@ -39,7 +39,10 @@ public abstract class SlotFadeMixin {
     @Inject(method = EXTRACT_SLOT, at = @At("RETURN"))
     private void uiTransitions$slotEnd(GuiGraphicsExtractor extractor, Slot slot, int mouseX, int mouseY,
                                        CallbackInfo ci) {
-        UiTransitions.endSlotFade(slot.y);
+        // 把"是不是固定行"一起传下去：固定行不参与"格子区上下界"的记录，
+        // 否则它们（在物品网格下方）会把滚动渐变的进入边拉到屏幕底部，
+        // 反而让自己算成最淡的那几行。
+        UiTransitions.endSlotFade(slot.y, isHotbarRow(slot));
     }
 
     /**
