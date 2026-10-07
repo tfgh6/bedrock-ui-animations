@@ -5,7 +5,7 @@ iconFile = "assets/ui_transitions/icon.png"
 
 [[mods]]
 modId = "ui_transitions"
-version = "1.5.0"
+version = "1.5.01"
 displayName = "Bedrock UI Animations"
 logoFile = "assets/ui_transitions/icon.png"
 # 元数据没法跟着游戏语言切换，所以这里写成中英双语，两个加载器保持一致
