@@ -95,7 +95,15 @@ public record Tween(long startNanos, long durationNanos, Easing easing, float fr
         }
         float normalized = Easing.clamp01((visible - from) / span);
         Easing target = easing == null ? NamedEasing.LINEAR : easing;
-        float progress = opening ? target.progressForOut(normalized) : target.progressForIn(normalized);
+        // 用哪个反解原语，是**按调用方接下来怎么取可见比例**定的，两者都对得上同一批数值：
+        //   · opening=true  —— 取值走 valueOut；本方法按"可见比例 = 1 - easeIn(p)"归一化，
+        //     与该式同一形状 ⇒ 用 progressForIn
+        //   · opening=false —— 取值走 valueIn；反解的是 easeIn 的反函数 ⇒ 用 progressForOut
+        // 这一对映射由 MathLayerVerify 的接续断言**双向锁住**：
+        //   alpha 连续、位移同步、进度落点三条同时在两种打断方向上成立。
+        // （写反的表现：新旧值恰好互换 —— 旧算 0.3 的场合新算 0.7，反之亦然。
+        //  两者都是"看着合理的小数"，肉眼与真机都发现不了，只有断言能抓。）
+        float progress = opening ? target.progressForIn(normalized) : target.progressForOut(normalized);
         long backdate = backdateNanos(progress, durationNanos);
         return new Tween(now - backdate, durationNanos, target, from, to);
     }

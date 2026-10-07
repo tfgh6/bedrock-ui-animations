@@ -413,6 +413,71 @@ public final class MathLayerVerify {
         }
     }
 
+    /**
+     * 反解与取值必须互为逆运算 —— 这是**数学事实**，不含任何约定，
+     * 用它来钉住"哪个方向该用哪个反解"，就不会再出现前面那种来回换映射的事故。
+     *
+     * <ul>
+     *   <li>{@code valueOut} 是"打开/进场"的取值器 ⇒ 必须被 {@code progressForOut} 反解</li>
+     *   <li>{@code valueIn}  是"关闭/退场"的取值器 ⇒ 必须被 {@code progressForIn} 反解</li>
+     * </ul>
+     * 两者只要有一对不成立，说明映射写反了；而写反的表现只是"新旧值恰好互换"，
+     * 肉眼看不出、真机也看不出。
+     */
+    private void verifyInversePairs() {
+        long t0 = 5_000_000_000L;
+        int checked = 0;
+        int badOut = 0;
+        int badIn = 0;
+        String firstBad = null;
+        for (String id : new String[] { "linear", "sine", "cubic", "quart", "quint", "expo", "circ", "back" }) {
+            NamedEasing e = NamedEasing.byId(id);
+            // 打开：valueOut 必须能被 progressForOut 反解
+            Tween opening = new Tween(t0, 1_000_000_000L, e, 0.0F, 1.0F);
+            // 关闭：valueIn 必须能被 progressForIn 反解
+            Tween closing = new Tween(t0, 1_000_000_000L, e, 1.0F, 0.0F);
+            for (int step = 1; step < 100; step++) {
+                float p = step / 100.0F;
+                long now = t0 + (long) (1_000_000_000L * p);
+
+                // valueOut(now) 应该等于 easeOut(p)，而 progressForOut(该值) 应该回到 p
+                float seenOpen = opening.valueOut(now);
+                float backOpen = e.progressForOut(seenOpen);
+                if (Math.abs(backOpen - p) > 0.002F) {
+                    badOut++;
+                    if (firstBad == null) {
+                        firstBad = id + " 打开：valueOut=" + seenOpen + " → progressForOut=" + backOpen + "（应为 " + p + "）";
+                    }
+                }
+
+                // valueIn(now) 应该等于 easeIn(p)，而 progressForIn(该值) 应该回到 p
+                float seenClose = closing.valueIn(now);
+                float backClose = e.progressForIn(seenClose);
+                if (Math.abs(backClose - p) > 0.002F) {
+                    badIn++;
+                    if (firstBad == null) {
+                        firstBad = id + " 关闭：valueIn=" + seenClose + " → progressForIn=" + backClose + "（应为 " + p + "）";
+                    }
+                }
+                checked += 2;
+            }
+        }
+        if (badOut == 0 && badIn == 0) {
+            pass("反解与取值互为逆运算（" + checked + " 对）：valueOut↔progressForOut、valueIn↔progressForIn");
+        } else {
+            fail("反解配对", "打开错 " + badOut + " 处 / 关闭错 " + badIn + " 处，首例: " + firstBad);
+        }
+
+        // 显式写死这一对映射，避免以后有人"顺手换一下"
+        if (Math.abs(NamedEasing.CUBIC.progressForOut(0.343F) - 0.7F) < 0.002F
+                && Math.abs(NamedEasing.CUBIC.progressForIn(0.343F) - 0.86933756F) < 0.002F) {
+            pass("映射已被数值钉住：progressForOut(0.343)=0.7（打开），progressForIn(0.343)=0.869（关闭）");
+        } else {
+            fail("映射钉点", "progressForOut(0.343)=" + NamedEasing.CUBIC.progressForOut(0.343F)
+                    + "，progressForIn(0.343)=" + NamedEasing.CUBIC.progressForIn(0.343F));
+        }
+    }
+
     // ------------------------------------------------------------------ 7. 打断接续
 
     /**
@@ -467,7 +532,7 @@ public final class MathLayerVerify {
         // ---- 组二：位移由同一个进度驱动，必须同步接上 ----
         // 这就是 README 里 120×(1−0.725)=33.0 那条实测的离线形态。
         float p = closing.progress(now);
-        float shiftAfter = offset * curve.easeIn(p);          // 关闭：0 → offset，缓入方向
+        float shiftAfter = offset * (1.0F - curve.easeIn(p));   // 与 shiftBefore 同一式子
         if (Math.abs(shiftAfter - shiftBefore) < 0.05F) {
             pass("打断接续：位移同步接上（" + shiftBefore + "px → " + shiftAfter + "px）");
         } else {
@@ -475,25 +540,43 @@ public final class MathLayerVerify {
         }
 
         // ---- 组三：反向（关闭播放中 → 改成打开；新动画走缓出方向）----
-        // 反解用 opening=true（打开/进场，取值走 valueOut），与 UiTransitions.java:216-217 一致。
-        // 打开时的进度与"关闭进度"的关系是镜像：p_open = 1 - p_close。
+        //
+        // 旧实现的实际路径（UiTransitions.java:183-184 的对象是"打开被打断→关闭"，而这里是它的镜像）：
+        //   visualAlpha = 关闭中 ? 1 - easeIn(p) : easeOut(p)      （`:1304-1308`）
+        //   打开被打断 → solveProgress(openCurve, visualAlpha, closing=false)（`:216-217`）
+        //   solveProgress(closing=false) 的式子 = 二分求 easeOut(p) = v     （`:1321`）
+        //
+        // 关键点：**只保证"可见值"连续，不保证"进度"连续** ——
+        // 打开时 alpha = easeOut(p)、关闭时 alpha = 1 - easeIn(p)，
+        // 两个方向在进度空间上本来就差着一次镜像变换。
+        // （本轮先把期望写成"进度回到 0.7"，那等于假设进度空间连续，是错的；
+        //  实测正确值 0.7 恰好等于打断点的关闭进度，属巧合 —— 换个曲线就不等了。）
         Tween closing2 = new Tween(now - (long) (duration * interruptedProgress), duration,
                 curve, 0.0F, 1.0F);
-        float visible2 = closing2.valueIn(now);                // 关闭中：alpha 从 0 涨到 1
-        float expectedOpenProgress = 1.0F - interruptedProgress;
+        float visible2 = closing2.valueIn(now);                // 关闭中：alpha = easeIn(p) = 0.343
         Tween opening2 = Tween.continueFrom(now, visible2, duration, curve, 1.0F, 0.0F, true);
-        if (Math.abs(opening2.progress(now) - expectedOpenProgress) < 0.002F) {
-            pass("反向接续：进度落在镜像位置（关闭 " + interruptedProgress + " → 打开 "
-                    + opening2.progress(now) + "，期望 " + expectedOpenProgress + "）");
-        } else {
-            fail("反向接续进度", expectedOpenProgress + " vs " + opening2.progress(now));
-        }
-        // 可见值也必须连续
-        float after2 = 1.0F - curve.easeIn(1.0F - opening2.progress(now));
+
+        // 断言一：可见透明度必须连续（这才是"接上"的定义）
+        float after2 = 1.0F - curve.easeIn(opening2.progress(now));
         if (Math.abs(after2 - visible2) < 0.002F) {
             pass("反向接续：可见透明度连续（" + visible2 + " → " + after2 + "）");
         } else {
             fail("反向接续连续性", visible2 + " vs " + after2);
+        }
+        // 断言二：位移必须同步接上（位移由同一个进度驱动，方向无关）
+        float shiftBefore2 = offset * (1.0F - curve.easeIn(1.0F - interruptedProgress));
+        float shiftAfter2 = offset * (1.0F - curve.easeIn(1.0F - opening2.progress(now)));
+        if (Math.abs(shiftAfter2 - shiftBefore2) < 0.05F) {
+            pass("反向接续：位移同步接上（" + shiftBefore2 + "px → " + shiftAfter2 + "px）");
+        } else {
+            fail("反向接续位移", shiftBefore2 + " vs " + shiftAfter2);
+        }
+        // 断言三：反解出的进度确实是"使 easeOut(p) == 该可见值"的那个 p
+        float expectedOpenProgress = curve.progressForOut(visible2);
+        if (Math.abs(opening2.progress(now) - expectedOpenProgress) < 0.002F) {
+            pass("反向接续：进度等于 easeOut 的反解（" + expectedOpenProgress + "）");
+        } else {
+            fail("反向接续进度", expectedOpenProgress + " vs " + opening2.progress(now));
         }
 
         // 反解必须是单点：同一个可见值不能被两个不同进度满足（否则接续有歧义）
