@@ -822,6 +822,121 @@ public class VerifyAdvanced {
                         + " 类名=" + TransitionConfig.isPrefixEntry("mezz.jei.SomeScreen"));
         TransitionConfig.setExcludedScreens("");
 
+        // ---------- 17) 界面分类：曲线 / 时长 / "跟随全局"的第三种状态 ----------
+        //
+        // 分类是"数据不是行为"（底层架构文档 §5.2）：加一个分类只加数据，不加代码。
+        // 这里验的就是那份数据的语义，以及最容易断的一环：**存盘再读回来还认不认**。
+
+        TransitionConfig.resetToDefaults();
+        check("分类默认跟随全局（老配置行为不变）",
+                TransitionConfig.Curve.FOLLOW_ID.equals(
+                        TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.CHAT))
+                        && !TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CHAT, false),
+                "id=" + TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.CHAT)
+                        + " ownOpen=" + TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CHAT, false));
+
+        // 聊天栏这一类单独配曲线 + 时长
+        TransitionConfig.setCategoryCurve(TransitionConfig.UiCategory.CHAT, "linear");
+        TransitionConfig.setCategoryDuration(TransitionConfig.UiCategory.CHAT, false, 700);
+        check("分类可以单独配曲线（取到的是配的那条，不是全局）",
+                "linear".equals(TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.CHAT))
+                        && Math.abs(TransitionConfig.curveForCategory(TransitionConfig.UiCategory.CHAT)
+                        .easeOut(0.5F) - TransitionConfig.Curve.LINEAR.easeOut(0.5F)) < 1.0e-6F,
+                "id=" + TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.CHAT));
+        check("分类可以单独配时长",
+                TransitionConfig.openDurationFor(TransitionConfig.UiCategory.CHAT) == 700
+                        && TransitionConfig.closeDurationFor(TransitionConfig.UiCategory.CHAT)
+                        == TransitionConfig.closeDurationMs(),
+                "渐入=" + TransitionConfig.openDurationFor(TransitionConfig.UiCategory.CHAT)
+                        + " 渐出=" + TransitionConfig.closeDurationFor(TransitionConfig.UiCategory.CHAT)
+                        + "（只配了渐入，渐出应当仍是全局 "
+                        + TransitionConfig.closeDurationMs() + "）");
+        check("配了时长的分类 hasOwnDuration=true（界面靠它区分「跟随全局」与「设成同一个值」）",
+                TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CHAT, false)
+                        && !TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CHAT, true),
+                "open=" + TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CHAT, false)
+                        + " close=" + TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CHAT, true));
+
+        // 别的分类不受影响
+        check("改一个分类不影响另一个分类",
+                TransitionConfig.openDurationFor(TransitionConfig.UiCategory.CREATIVE)
+                        == TransitionConfig.openDurationMs(),
+                "创造物品栏=" + TransitionConfig.openDurationFor(TransitionConfig.UiCategory.CREATIVE)
+                        + " 全局=" + TransitionConfig.openDurationMs());
+
+        // **回退到"跟随全局"**：这是第三种状态，配置界面上输入 default 就走这条
+        TransitionConfig.setCategoryDuration(TransitionConfig.UiCategory.CHAT, false, 0);
+        check("时长设回 0 表示「回到跟随全局」（而不是「时长 0 毫秒」）",
+                !TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CHAT, false)
+                        && TransitionConfig.openDurationFor(TransitionConfig.UiCategory.CHAT)
+                        == TransitionConfig.openDurationMs(),
+                "own=" + TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CHAT, false)
+                        + " 生效值=" + TransitionConfig.openDurationFor(TransitionConfig.UiCategory.CHAT)
+                        + " 全局=" + TransitionConfig.openDurationMs());
+        TransitionConfig.setCategoryCurve(TransitionConfig.UiCategory.CHAT,
+                TransitionConfig.Curve.FOLLOW_ID);
+        check("曲线设回 default 表示跟随全局",
+                TransitionConfig.Curve.FOLLOW_ID.equals(
+                        TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.CHAT)),
+                "id=" + TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.CHAT));
+
+        // 分类曲线真的参与透明度计算，而不是只存在配置里
+        TransitionConfig.setOpenCurve("linear");
+        TransitionConfig.setCloseCurve("linear");
+        TransitionConfig.setCategoryCurve(TransitionConfig.UiCategory.CONTAINER, "quart");
+        float globalMid = TransitionConfig.openCurve().easeOut(0.5F);
+        float categoryMid = TransitionConfig.curveForCategory(
+                TransitionConfig.UiCategory.CONTAINER).easeOut(0.5F);
+        check("分类曲线与全局曲线是两条不同的求值",
+                Math.abs(globalMid - categoryMid) > 0.05F,
+                "全局=" + globalMid + " 容器分类=" + categoryMid);
+
+        // ---------- 18) 分类配置的**存取往返**（最容易静默丢数据的一环）----------
+        //
+        // 只写"不跟随全局"的分类，所以必须验证两件事：
+        //   · 配过的分类，存盘再读回来还在；
+        //   · 没配过的分类，读回来仍是"跟随全局"（而不是被写成全局的值）。
+        TransitionConfig.resetToDefaults();
+        TransitionConfig.setCategoryCurve(TransitionConfig.UiCategory.GAME_MENU, "expo");
+        TransitionConfig.setCategoryDuration(TransitionConfig.UiCategory.GAME_MENU, true, 900);
+        TransitionConfig.save();
+        TransitionConfig.ensureLoaded();   // 公开的读取入口（load() 是私有的）
+        check("分类的曲线能存盘再读回来",
+                "expo".equals(TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.GAME_MENU)),
+                "id=" + TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.GAME_MENU));
+        check("分类的时长能存盘再读回来",
+                TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.GAME_MENU, true)
+                        && TransitionConfig.closeDurationFor(TransitionConfig.UiCategory.GAME_MENU) == 900,
+                "ownClose=" + TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.GAME_MENU, true)
+                        + " 值=" + TransitionConfig.closeDurationFor(TransitionConfig.UiCategory.GAME_MENU));
+        check("没配过的分类读回来仍是跟随全局（不被写成全局的值）",
+                TransitionConfig.Curve.FOLLOW_ID.equals(
+                        TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.CREATIVE))
+                        && !TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CREATIVE, true),
+                "id=" + TransitionConfig.categoryCurveId(TransitionConfig.UiCategory.CREATIVE)
+                        + " ownClose=" + TransitionConfig.hasOwnDuration(TransitionConfig.UiCategory.CREATIVE, true));
+
+        // ---------- 19) 分类判定：类名 → 分类 ----------
+        check("容器界面归到 container",
+                TransitionConfig.UiCategory.of("net.minecraft.client.gui.screens.inventory.ChestScreen")
+                        == TransitionConfig.UiCategory.CONTAINER,
+                "=" + TransitionConfig.UiCategory.of(
+                        "net.minecraft.client.gui.screens.inventory.ChestScreen"));
+        check("聊天输入框归到 chat",
+                TransitionConfig.UiCategory.of("net.minecraft.client.gui.screens.ChatScreen")
+                        == TransitionConfig.UiCategory.CHAT,
+                "=" + TransitionConfig.UiCategory.of("net.minecraft.client.gui.screens.ChatScreen"));
+        check("创造物品栏归到 creative",
+                TransitionConfig.UiCategory.of(
+                        "net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen")
+                        == TransitionConfig.UiCategory.CREATIVE,
+                "=" + TransitionConfig.UiCategory.of(
+                        "net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen"));
+        check("认不出来的界面归到 other（不是崩、也不是当成容器）",
+                TransitionConfig.UiCategory.of("com.example.WeirdScreen") == TransitionConfig.UiCategory.OTHER
+                        && TransitionConfig.UiCategory.of(null) == TransitionConfig.UiCategory.OTHER,
+                "=" + TransitionConfig.UiCategory.of("com.example.WeirdScreen"));
+
         TransitionConfig.resetToDefaults();
         System.out.println();
         if (failures == 0) {

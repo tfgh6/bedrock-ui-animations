@@ -328,6 +328,9 @@ public final class UiTransitionsConfigScreen {
                 })
                 .build());
 
+        // ============================================================ 按界面分类
+        buildCategoryEntries(builder, entries);
+
         // ============================================================ 界面开关
         ConfigCategory perScreen = builder.getOrCreateCategory(Component.translatable("ui_transitions.config.category.screens"));
 
@@ -363,6 +366,124 @@ public final class UiTransitionsConfigScreen {
                 .build());
 
         return builder.build();
+    }
+
+    /**
+     * 「按界面分类」这一页：聊天栏 / 创造物品栏 / 游戏菜单 / 容器界面 / 传送门 / 其它。
+     *
+     * 每一类可以配**自己的曲线**和**自己的一对时长**；不配就是"跟随全局"。
+     * 这一页是"分类 = 数据"的直接体现：加一个分类只需要往 {@code UiCategory} 里加一项，
+     * 这里会自动多出一块，**不需要新增任何动画代码** —— 这正是底层架构文档 §5.2 的验收标准
+     * 在分类维度上的样子。
+     *
+     * 时长用**文本框**而不是滑块，是为了能表达第三种状态："跟随全局"。
+     * 滑块只有数值，没法区分"没配过"与"配成了和全局一样"，界面上就永远显示不出"跟随全局"。
+     */
+    private static void buildCategoryEntries(ConfigBuilder builder, ConfigEntryBuilder entries) {
+        ConfigCategory categories = builder.getOrCreateCategory(
+                Component.translatable("ui_transitions.config.category.by_screen"));
+
+        categories.addEntry(entries.startTextDescription(
+                Component.translatable("ui_transitions.config.by_screen.intro")).build());
+
+        for (TransitionConfig.UiCategory category : TransitionConfig.UiCategory.values()) {
+            var group = entries.startSubCategory(Component.translatable(category.labelKey()));
+            group.setExpanded(false);       // 默认折叠：六类全展开会把这一页拉得很长
+
+            group.add(entries.startStrField(
+                            Component.translatable("ui_transitions.config.category.curve"),
+                            TransitionConfig.categoryCurveId(category))
+                    .setDefaultValue(TransitionConfig.Curve.FOLLOW_ID)
+                    .setErrorSupplier(UiTransitionsConfigScreen::categoryCurveError)
+                    .setTooltip(Component.translatable("ui_transitions.config.category.curve.tip1"),
+                            Component.translatable("ui_transitions.config.category.curve.tip2"),
+                            Component.translatable("ui_transitions.config.category.curve.tip3"))
+                    .setSaveConsumer(value -> TransitionConfig.setCategoryCurve(category, value))
+                    .build());
+
+            group.add(entries.startStrField(
+                            Component.translatable("ui_transitions.config.category.open_ms"),
+                            durationText(TransitionConfig.openDurationFor(category),
+                                    TransitionConfig.hasOwnDuration(category, false)))
+                    .setDefaultValue(FOLLOW_TEXT)
+                    .setErrorSupplier(UiTransitionsConfigScreen::durationError)
+                    .setTooltip(Component.translatable("ui_transitions.config.category.ms.tip1"),
+                            Component.translatable("ui_transitions.config.category.ms.tip2"))
+                    .setSaveConsumer(value -> TransitionConfig.setCategoryDuration(
+                            category, false, parseDuration(value)))
+                    .build());
+
+            group.add(entries.startStrField(
+                            Component.translatable("ui_transitions.config.category.close_ms"),
+                            durationText(TransitionConfig.closeDurationFor(category),
+                                    TransitionConfig.hasOwnDuration(category, true)))
+                    .setDefaultValue(FOLLOW_TEXT)
+                    .setErrorSupplier(UiTransitionsConfigScreen::durationError)
+                    .setTooltip(Component.translatable("ui_transitions.config.category.ms.tip1"),
+                            Component.translatable("ui_transitions.config.category.ms.tip2"))
+                    .setSaveConsumer(value -> TransitionConfig.setCategoryDuration(
+                            category, true, parseDuration(value)))
+                    .build());
+
+            categories.addEntry(group.build());
+        }
+    }
+
+    /** 时长的"跟随全局"写法 */
+    static final String FOLLOW_TEXT = "default";
+
+    /** 当前时长显示成什么：跟随全局就显示 default（后面附带全局值，方便对照） */
+    private static String durationText(int value, boolean hasOwn) {
+        return hasOwn ? Integer.toString(value) : FOLLOW_TEXT;
+    }
+
+    /** "default" / 空 → 0（表示回到跟随全局）；其它按整数解析，非法值也回退成跟随 */
+    private static int parseDuration(String raw) {
+        if (raw == null || raw.isBlank() || FOLLOW_TEXT.equalsIgnoreCase(raw.trim())) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /** 时长文本框的校验：default 或合法范围内的整数 */
+    private static java.util.Optional<Component> durationError(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if (value.isEmpty() || FOLLOW_TEXT.equalsIgnoreCase(value)) {
+            return java.util.Optional.empty();
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed >= TransitionConfig.MIN_DURATION_MS && parsed <= TransitionConfig.MAX_DURATION_MS) {
+                return java.util.Optional.empty();
+            }
+        } catch (NumberFormatException ignored) {
+            // 落到下面统一报错
+        }
+        return java.util.Optional.of(Component.translatable("ui_transitions.config.category.ms_error",
+                FOLLOW_TEXT, TransitionConfig.MIN_DURATION_MS, TransitionConfig.MAX_DURATION_MS));
+    }
+
+    /** 分类曲线文本框的校验：比通用曲线多允许一个 default（= 跟随全局） */
+    private static java.util.Optional<Component> categoryCurveError(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (TransitionConfig.Curve.FOLLOW_ID.equals(normalized)
+                || TransitionConfig.Curve.byId(value).id().equals(normalized)) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(Component.translatable("ui_transitions.config.curve_error",
+                String.join(" / ", allCategoryCurveIds())));
+    }
+
+    /** 可选曲线 id，前面加上 default（跟随全局），供提示用 */
+    private static java.util.List<String> allCategoryCurveIds() {
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        ids.add(TransitionConfig.Curve.FOLLOW_ID);
+        ids.addAll(java.util.Arrays.asList(TransitionConfig.Curve.ids()));
+        return ids;
     }
 
     /** 曲线文本框的校验：值必须是已知曲线 id */
