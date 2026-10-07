@@ -274,6 +274,40 @@ public final class ColorMathVerify {
         } else {
             fail("通道隔离", engine.alphaOf(Channel.TEXT) + " / " + engine.alphaOf(Channel.BLIT));
         }
+
+        // ── 显式 alpha 重载**不查来源**（实现侧提出的一条隐式依赖，必须有断言钉住）──
+        //
+        // 两个重载只差一个参数，看调用点分不出哪个会去查来源：
+        //     apply(channel, color)          → 读来源 ×1
+        //     apply(channel, color, alpha)   → 不读来源，只用 alpha ×1
+        // 若哪天有人让 alphaOf 也参与进来，就会**双重乘**，表现是"聊天淡入看起来只有一半深"
+        // —— 绝不会被归因到乘法次数。所以这里把"结果只由显式 alpha 决定"钉死。
+        float[] sourceValue = { 0.5F };
+        Engine fixed = new Engine(() -> sourceValue[0], () -> sourceValue[0], () -> sourceValue[0]);
+        int explicitResult = fixed.apply(Channel.TEXT, 0xFFFFFFFF, 0.25F);
+        int expectedExplicit = ColorMath.apply(0xFFFFFFFF, 0.25F, false);
+        // 来源值故意与显式 alpha 不同（0.5 vs 0.25）：若被二次乘，结果会是 0x40 而不是 0xBF
+        if (explicitResult == expectedExplicit) {
+            pass("显式 alpha 重载不查来源（显式 0.25、来源 0.5 → " + hex(explicitResult)
+                    + "，与来源无关）");
+        } else {
+            fail("显式 alpha 不查来源", "实得 " + hex(explicitResult) + "，期望 " + hex(expectedExplicit)
+                    + "（若为 0x40FFFFFF 说明发生了双重乘）");
+        }
+        // 换一个来源值，结果必须**完全不变** —— 这才是"与来源无关"的强形式
+        sourceValue[0] = 0.9F;
+        if (fixed.apply(Channel.TEXT, 0xFFFFFFFF, 0.25F) == explicitResult) {
+            pass("改来源值后显式结果不变（0.5 → 0.9 仍得 " + hex(explicitResult) + "）");
+        } else {
+            fail("显式 alpha 与来源无关性", "改来源后结果变了");
+        }
+        // 反面对照：不带 alpha 的重载**必须**跟着来源变（证明这条断言不是空转）
+        int fromSource = fixed.apply(Channel.TEXT, 0xFFFFFFFF);
+        if (fromSource == ColorMath.apply(0xFFFFFFFF, 0.9F, false)) {
+            pass("不带 alpha 的重载确实读来源（0.9 → " + hex(fromSource) + "）—— 对照有效");
+        } else {
+            fail("来源读取对照", hex(fromSource) + "，期望按来源 0.9 调制");
+        }
     }
 
     // ------------------------------------------------------------------ 6. 可证伪

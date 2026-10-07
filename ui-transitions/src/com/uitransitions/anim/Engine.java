@@ -90,7 +90,28 @@ public final class Engine {
         }
     }
 
-    /** 按通道 + **显式 alpha** 施加（给"调用方已经算好 alpha"的场景，例如文字乘子已在外面算完）。 */
+    /**
+     * 按通道 + **显式 alpha** 施加（给"调用方已经算好 alpha"的场景，例如文字乘子已在外面算完）。
+     *
+     * <h3>⚠️ 本重载**不查 alpha 来源**，只做一次乘法</h3>
+     *
+     * 调用方传进来的 {@code alpha} 会被**原样使用**，不会再去读该通道的
+     * {@link Channel.AlphaSource}。这一点看调用点是**分不出来**的 ——
+     * 两个重载只差一个参数。所以：
+     *
+     * <pre>{@code
+     * engine.apply(Channel.TEXT, color);            // 读 TEXT_ALPHA 来源 × 1 次
+     * engine.apply(Channel.TEXT, color, alpha);     // 不读来源，只用 alpha × 1 次
+     * }</pre>
+     *
+     * <p>现有调用点（{@code UiTransitions.applyAlphaText}）走的是**后者**，因为它在外面
+     * 已经把 {@code TEXT_ALPHA} 与聊天乘子乘完了。**如果哪天改成让 alphaOf 也参与进来，
+     * 就会变成双重乘** —— 而表现是"聊天淡入看起来只有一半深"这种
+     * 绝不会被归因到乘法次数的现象。
+     *
+     * <p>这条依赖由 {@code ColorMathVerify} 的
+     * "显式 alpha 不做来源查询"断言钉住（断言与 TEXT_ALPHA 的当前值无关）。
+     */
     public int apply(Channel channel, int color, float alpha) {
         try {
             return this.renderer.apply(channel, color, alpha);
